@@ -1,0 +1,109 @@
+from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, ARRAY, Enum, Index
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+from pgvector.sqlalchemy import Vector
+from app.database import Base
+import uuid
+from datetime import datetime
+import enum
+
+class JobStatus(str, enum.Enum):
+    """Job posting status"""
+    DRAFT = "draft"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    CLOSED = "closed"
+
+class JobDescription(Base):
+    """
+    Job description model with vector embeddings for semantic search.
+    
+    Stores job postings with metadata and semantic embeddings
+    for AI-powered candidate matching.
+    
+    SECURITY: Protected by RLS policy - tenant_id isolation enforced at database level.
+    """
+    __tablename__ = "job_descriptions"
+    
+    # Primary & Tenant Keys
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    
+    # Job Details
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=False)
+    requirements = Column(Text, nullable=False)
+    
+    # Skills (stored as array for efficient querying)
+    skills = Column(ARRAY(String), nullable=False, default=[])
+    
+    # Additional Info
+    location = Column(String(255), nullable=True)
+    salary_min = Column(Integer, nullable=True)
+    salary_max = Column(Integer, nullable=True)
+    experience_years = Column(Integer, nullable=True)
+    employment_type = Column(String(50), nullable=True)  # full-time, part-time, contract
+    
+    # Status
+    status = Column(Enum(JobStatus), nullable=False, default=JobStatus.DRAFT, index=True)
+    
+    # Vector Embedding (1024 dimensions for Claude embeddings)
+    embedding = Column(Vector(1024), nullable=True)
+    
+    # Timestamps
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    closed_at = Column(DateTime, nullable=True)
+    
+    # Soft delete
+    deleted_at = Column(DateTime, nullable=True)
+    
+    # Relationships
+    tenant = relationship("Tenant", back_populates="job_descriptions")
+    creator = relationship("User")
+    matches = relationship("Match", back_populates="job_description", cascade="all, delete-orphan")
+    
+    # Database indexes for performance (v3.1: Added composite vector index)
+    __table_args__ = (
+        Index('idx_jd_tenant_status', 'tenant_id', 'status'),
+        Index('idx_jd_created_at_desc', 'created_at', postgresql_using='btree'),
+        Index('idx_jd_skills', 'skills', postgresql_using='gin'),  # GIN index for array operations
+        Index('idx_jd_tenant_embedding', 'tenant_id', 'embedding', postgresql_using='ivfflat'),  # Composite vector index
+    )
+    
+    def __repr__(self):
+        return f"<JobDescription {self.title}>"
+    
+    @property
+    def candidate_count(self) -> int:
+        """Get count of candidates matched to this job"""
+        return len(self.matches) if self.matches else 0
+    
+    def is_active(self) -> bool:
+        """Check if job is active"""
+        return self.status == JobStatus.ACTIVE and self.deleted_at is None
+    
+    def to_text_for_embedding(self) -> str:
+        """
+        Convert job description to text for embedding generation.
+        
+        Returns:
+            Formatted string combining all relevant job information
+        """
+        skills_text = ", ".join(self.skills) if self.skills else ""
+        
+        text_parts = [
+            f"Job Title: {self.title}",
+            f"Description: {self.description}",
+            f"Requirements: {self.requirements}",
+            f"Required Skills: {skills_text}",
+        ]
+        
+        if self.experience_years:
+            text_parts.append(f"Experience Required: {self.experience_years} years")
+        
+        if self.location:
+            text_parts.append(f"Location: {self.location}")
+        
+        return "\n\n".join(text_parts)

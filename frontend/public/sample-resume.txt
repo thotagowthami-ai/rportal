@@ -1,0 +1,8 @@
+Sample Resume
+-------------
+Name: John Candidate
+Role: Software Engineer
+Experience: 7 years
+
+Summary:
+Experienced engineer with a focus on Android and web development.

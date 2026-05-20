@@ -1,0 +1,270 @@
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from uuid import UUID
+import math
+
+from app.database import get_db, set_tenant_context
+from app.schemas.job_description import (
+    JobDescriptionCreate,
+    JobDescriptionUpdate,
+    JobDescriptionResponse,
+    JobDescriptionList
+)
+from app.models.job_description import JobDescription, JobStatus
+from app.models.user import User
+from app.routers.auth import get_current_user
+from app.services.embedding_service import embedding_service
+import logging
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(
+    prefix="/api/job-descriptions",
+    tags=["Job Descriptions"]
+)
+
+
+@router.post("/", response_model=JobDescriptionResponse, status_code=status.HTTP_201_CREATED)
+async def create_job_description(
+    job_data: JobDescriptionCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Create a new job description.
+    
+    Automatically generates embeddings for semantic search.
+    Sets tenant context for RLS.
+    """
+    try:
+        # Set tenant context for RLS
+        set_tenant_context(db, str(current_user.tenant_id))
+        
+        # Create job description
+        new_job = JobDescription(
+            tenant_id=current_user.tenant_id,
+            created_by=current_user.id,
+            title=job_data.title,
+            description=job_data.description,
+            requirements=job_data.requirements,
+            skills=job_data.skills,
+            location=job_data.location,
+            salary_min=job_data.salary_min,
+            salary_max=job_data.salary_max,
+            experience_years=job_data.experience_years,
+            employment_type=job_data.employment_type,
+            status=JobStatus(job_data.status) if job_data.status else JobStatus.DRAFT
+        )
+        
+        # Generate embedding for semantic search (async)
+        try:
+            job_text = new_job.to_text_for_embedding()
+            embedding = await embedding_service.generate_embedding(job_text)
+            if embedding:
+                new_job.embedding = embedding
+                logger.info(f"Generated embedding for job: {new_job.title}")
+        except Exception as e:
+            logger.warning(f"Failed to generate embedding: {str(e)}")
+            # Continue without embedding - not critical
+        
+        db.add(new_job)
+        db.commit()
+        db.refresh(new_job)
+        
+        logger.info(f"Job description created: {new_job.title} by user {current_user.email}")
+        
+        return new_job
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to create job description: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create job description: {str(e)}"
+        )
+
+
+@router.get("/", response_model=JobDescriptionList)
+def list_job_descriptions(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    status_filter: Optional[str] = Query(None, description="Filter by status"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    List all job descriptions with pagination.
+    
+    Filters by tenant (automatic via RLS).
+    Optional status filter.
+    """
+    # Set tenant context for RLS
+    set_tenant_context(db, str(current_user.tenant_id))
+    
+    # Build query
+    query = db.query(JobDescription).filter(JobDescription.deleted_at.is_(None))
+    
+    # Apply status filter if provided
+    if status_filter:
+        try:
+            status_enum = JobStatus(status_filter)
+            query = query.filter(JobDescription.status == status_enum)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid status: {status_filter}"
+            )
+    
+    # Order by created date (newest first)
+    query = query.order_by(JobDescription.created_at.desc())
+    
+    # Get total count
+    total = query.count()
+    
+    # Calculate pagination
+    total_pages = math.ceil(total / page_size)
+    skip = (page - 1) * page_size
+    
+    # Get paginated results
+    jobs = query.offset(skip).limit(page_size).all()
+    
+    return JobDescriptionList(
+        items=jobs,
+        total=total,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages
+    )
+
+
+@router.get("/{job_id}", response_model=JobDescriptionResponse)
+def get_job_description(
+    job_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get a specific job description by ID.
+    
+    Automatically filtered by tenant via RLS.
+    """
+    # Set tenant context for RLS
+    set_tenant_context(db, str(current_user.tenant_id))
+    
+    job = db.query(JobDescription).filter(
+        JobDescription.id == job_id,
+        JobDescription.deleted_at.is_(None)
+    ).first()
+    
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job description not found"
+        )
+    
+    return job
+
+
+@router.put("/{job_id}", response_model=JobDescriptionResponse)
+async def update_job_description(
+    job_id: UUID,
+    job_data: JobDescriptionUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Update a job description.
+    
+    Regenerates embeddings if content changed.
+    """
+    # Set tenant context for RLS
+    set_tenant_context(db, str(current_user.tenant_id))
+    
+    job = db.query(JobDescription).filter(
+        JobDescription.id == job_id,
+        JobDescription.deleted_at.is_(None)
+    ).first()
+    
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job description not found"
+        )
+    
+    try:
+        # Track if content changed (for embedding regeneration)
+        content_changed = False
+        
+        # Update fields
+        update_data = job_data.dict(exclude_unset=True)
+        for field, value in update_data.items():
+            if field == "status" and value:
+                setattr(job, field, JobStatus(value))
+            else:
+                setattr(job, field, value)
+            
+            # Check if content fields changed
+            if field in ['title', 'description', 'requirements', 'skills']:
+                content_changed = True
+        
+        # Regenerate embedding if content changed
+        if content_changed:
+            try:
+                job_text = job.to_text_for_embedding()
+                embedding = await embedding_service.generate_embedding(job_text)
+                if embedding:
+                    job.embedding = embedding
+                    logger.info(f"Regenerated embedding for job: {job.title}")
+            except Exception as e:
+                logger.warning(f"Failed to regenerate embedding: {str(e)}")
+        
+        db.commit()
+        db.refresh(job)
+        
+        logger.info(f"Job description updated: {job.title}")
+        
+        return job
+        
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to update job description: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update job description: {str(e)}"
+        )
+
+
+@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_job_description(
+    job_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Soft delete a job description.
+    
+    Sets deleted_at timestamp instead of actually deleting.
+    """
+    # Set tenant context for RLS
+    set_tenant_context(db, str(current_user.tenant_id))
+    
+    job = db.query(JobDescription).filter(
+        JobDescription.id == job_id,
+        JobDescription.deleted_at.is_(None)
+    ).first()
+    
+    if not job:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Job description not found"
+        )
+    
+    from datetime import datetime
+    job.deleted_at = datetime.utcnow()
+    
+    db.commit()
+    
+    logger.info(f"Job description deleted: {job.title}")
+    
+    return None

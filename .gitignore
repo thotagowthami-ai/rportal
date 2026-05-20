@@ -1,0 +1,28 @@
+# Environment files
+.env
+.env.*
+backend/.env
+frontend/.env.local
+
+# Python backend
+backend/venv/
+backend/__pycache__/
+backend/.pytest_cache/
+*.pyc
+
+# Node / Next frontend
+frontend/node_modules/
+frontend/.next/
+frontend/test-results/
+frontend/playwright-report/
+
+# Uploads / DB / cache
+backend/uploads/
+backend/test.db
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+desktop.ini
