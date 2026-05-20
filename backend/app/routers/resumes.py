@@ -303,54 +303,50 @@ async def upload_multiple_resumes(
                 detail="Legacy .doc files require LibreOffice installed on the server. Please upload .docx or PDF, or install LibreOffice and ensure 'soffice' is in PATH.",
             )
 
-        for file in files:
-            if not file.filename:
-                continue
-            file_bytes = await file.read()
-            if not file_bytes:
-                continue
+        file_bytes = await file.read()
+        if not file_bytes:
+            continue
 
-            content_type = file.content_type or ""
-            file_path = storage_service.upload_bytes(
-                file_bytes, file.filename, content_type=content_type, prefix="resumes"
-            )
-            if not file_path:
-                os.makedirs(UPLOADS_DIR, exist_ok=True)
-                file_id = str(uuid.uuid4())
-                file_path = os.path.join(UPLOADS_DIR, f"{file_id}_{file.filename}")
-                with open(file_path, "wb") as buffer:
-                    buffer.write(file_bytes)
-            
-            resolved_name = (candidate_name or "").strip() or file.filename
-            file_ext = os.path.splitext(file.filename)[1].lstrip(".").lower()[:50] or "unknown"
-            parsed = {"candidate_email": "", "candidate_phone": "", "skills": [], "experience_years": 0, "education": "", "current_role": ""}
-            resume_text = None
+        content_type = file.content_type or ""
+        file_path = storage_service.upload_bytes(
+            file_bytes, file.filename, content_type=content_type, prefix="resumes"
+        )
+        if not file_path:
+            os.makedirs(UPLOADS_DIR, exist_ok=True)
+            file_id = str(uuid.uuid4())
+            file_path = os.path.join(UPLOADS_DIR, f"{file_id}_{file.filename}")
+            with open(file_path, "wb") as buffer:
+                buffer.write(file_bytes)
+        
+        resolved_name = (candidate_name or "").strip() or file.filename
+        parsed = {"candidate_email": "", "candidate_phone": "", "skills": [], "experience_years": 0, "education": "", "current_role": ""}
+        resume_text = None
 
-            try:
-                resume_text = extract_resume_text(file_bytes, file.filename, content_type)
-                parsed = parse_resume_text(resume_text or "")
-                logger.info(f"Parsed resume fields for {file.filename}: {parsed}")
-            except Exception as e:
-                logger.error(f"Error parsing resume {file.filename}: {e}")
+        try:
+            resume_text = extract_resume_text(file_bytes, file.filename, content_type)
+            parsed = parse_resume_text(resume_text or "")
+            logger.info(f"Parsed resume fields for {file.filename}: {parsed}")
+        except Exception as e:
+            logger.error(f"Error parsing resume {file.filename}: {e}")
 
-            resume = Resume(
-                tenant_id=str(current_user.tenant_id),
-                uploaded_by=str(current_user.id),
-                candidate_name=resolved_name,
-                candidate_email=(candidate_email or parsed.get("candidate_email") or None),
-                candidate_phone=(candidate_phone or parsed.get("candidate_phone") or None),
-                file_path=file_path,
-                file_name=file.filename,
-                file_type=file_ext,
-                resume_text=resume_text,
-                skills=_to_storage_skills(db, parsed.get("skills", [])),
-                work_experience=_to_storage_work_experience(db, parsed.get("work_experience", [])),
-                experience_years=(parsed.get("experience_years") or None),
-                education=_normalize_education(parsed.get("education")),
-                current_role=(parsed.get("current_role") or None),
-            )
-            db.add(resume)
-            created_resumes.append(resume)
+        resume = Resume(
+            tenant_id=str(current_user.tenant_id),
+            uploaded_by=str(current_user.id),
+            candidate_name=resolved_name,
+            candidate_email=(candidate_email or parsed.get("candidate_email") or None),
+            candidate_phone=(candidate_phone or parsed.get("candidate_phone") or None),
+            file_path=file_path,
+            file_name=file.filename,
+            file_type=file_ext,
+            resume_text=resume_text,
+            skills=_to_storage_skills(db, parsed.get("skills", [])),
+            work_experience=_to_storage_work_experience(db, parsed.get("work_experience", [])),
+            experience_years=(parsed.get("experience_years") or None),
+            education=_normalize_education(parsed.get("education")),
+            current_role=(parsed.get("current_role") or None),
+        )
+        db.add(resume)
+        created_resumes.append(resume)
 
     try:
         db.commit()
