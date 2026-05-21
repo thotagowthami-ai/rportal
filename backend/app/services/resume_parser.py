@@ -3,7 +3,7 @@ import os
 import shutil
 import subprocess
 import tempfile
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from PyPDF2 import PdfReader
 
 
