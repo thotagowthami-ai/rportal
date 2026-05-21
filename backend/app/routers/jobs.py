@@ -34,6 +34,11 @@ async def list_jobs_public(
     db: Session = Depends(get_db)
 ):
     """List only active job descriptions for candidates"""
+    if page < 1 or page_size < 1:
+        raise HTTPException(status_code=400, detail="Page and page_size must be greater than or equal to 1")
+    if page_size > 500:
+        raise HTTPException(status_code=400, detail="Page size cannot exceed 500")
+
     query = db.query(JobDescription).filter(
         JobDescription.status == "active",
         JobDescription.deleted_at.is_(None)
@@ -240,9 +245,9 @@ async def _create_job_internal(
     """Shared create pipeline for structured form and plain-text format."""
     # Map salary_min/max to salary_range
     salary_range = None
-    if job_data.salary_min and job_data.salary_max:
+    if job_data.salary_min is not None and job_data.salary_max is not None:
         salary_range = f"${job_data.salary_min}-${job_data.salary_max}"
-    elif job_data.salary_min:
+    elif job_data.salary_min is not None:
         salary_range = f"${job_data.salary_min}+"
 
     job = JobDescription(
@@ -274,6 +279,13 @@ async def _create_job_internal(
     db.add(job)
     db.commit()
     db.refresh(job)
+
+    # Invalidate cached analytics overview for this tenant
+    try:
+        from app.routers.analytics import invalidate_analytics_cache
+        invalidate_analytics_cache(str(current_user.tenant_id))
+    except Exception:
+        pass
 
     # Publish flow: auto-generate matches.
     if job.status == "active":
@@ -321,10 +333,10 @@ async def create_job(
         return response
     except Exception as e:
         db.rollback()
-        logger.error(f"Job creation failed: {str(e)}")
+        logger.exception("Job creation failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Job creation failed: {str(e)}"
+            detail="Internal server error while creating job"
         )
 
 
@@ -344,10 +356,10 @@ async def create_job_from_text(
         return response
     except Exception as e:
         db.rollback()
-        logger.error(f"Plain-text job creation failed: {str(e)}")
+        logger.exception("Plain-text job creation failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Plain-text job creation failed: {str(e)}"
+            detail="Internal server error while creating job from plain text"
         )
 
 
@@ -360,6 +372,11 @@ async def list_jobs(
     current_user: User = Depends(get_current_user)
 ):
     """List job descriptions with pagination"""
+    if page < 1 or page_size < 1:
+        raise HTTPException(status_code=400, detail="Page and page_size must be greater than or equal to 1")
+    if page_size > 500:
+        raise HTTPException(status_code=400, detail="Page size cannot exceed 500")
+
     query = db.query(JobDescription).filter(
         JobDescription.tenant_id == current_user.tenant_id,
         JobDescription.deleted_at.is_(None)
@@ -462,14 +479,38 @@ async def update_job(
         
          
         
-        # Handle salary range
+        # Handle salary range merging
+        min_bound = None
+        max_bound = None
+        
+        # 1. Parse existing bounds from current job.salary_range
+        if job.salary_range:
+            match_range = re.match(r"^\$(\d+)-\$(\d+)$", job.salary_range)
+            if match_range:
+                min_bound = int(match_range.group(1))
+                max_bound = int(match_range.group(2))
+            else:
+                match_plus = re.match(r"^\$(\d+)\+$", job.salary_range)
+                if match_plus:
+                    min_bound = int(match_plus.group(1))
+
+        # 2. Merge with update parameters if present
         if 'salary_min' in update_data or 'salary_max' in update_data:
-            salary_min = update_data.pop('salary_min', None)
-            salary_max = update_data.pop('salary_max', None)
-            if salary_min and salary_max:
-                update_data['salary_range'] = f"${salary_min}-${salary_max}"
-            elif salary_min:
-                update_data['salary_range'] = f"${salary_min}+"
+            salary_min_payload = update_data.pop('salary_min', None)
+            salary_max_payload = update_data.pop('salary_max', None)
+            
+            if 'salary_min' in job_data.model_fields_set:
+                min_bound = salary_min_payload
+            if 'salary_max' in job_data.model_fields_set:
+                max_bound = salary_max_payload
+
+            # Construct new salary_range
+            if min_bound is not None and max_bound is not None:
+                update_data['salary_range'] = f"${min_bound}-${max_bound}"
+            elif min_bound is not None:
+                update_data['salary_range'] = f"${min_bound}+"
+            else:
+                update_data['salary_range'] = None
         
         for field, value in update_data.items():
             if field in {"required_skills", "preferred_skills"}:
@@ -493,6 +534,13 @@ async def update_job(
         db.commit()
         db.refresh(job)
         
+        # Invalidate cached analytics overview for this tenant
+        try:
+            from app.routers.analytics import invalidate_analytics_cache
+            invalidate_analytics_cache(str(current_user.tenant_id))
+        except Exception:
+            pass
+        
         logger.info(f"Job updated: {job.title} by {current_user.email}")
         
         return JobDescriptionResponse(
@@ -504,8 +552,8 @@ async def update_job(
             required_skills=_to_list(job.required_skills),
             preferred_skills=_to_list(job.preferred_skills),
             location=job.location,
-            salary_min=None,
-            salary_max=None,
+            salary_min=min_bound,
+            salary_max=max_bound,
             experience_required=job.experience_required,
             education_required=job.education_required,
             employment_type=job.employment_type,
@@ -516,10 +564,10 @@ async def update_job(
         
     except Exception as e:
         db.rollback()
-        logger.error(f"Job update failed: {str(e)}")
+        logger.exception("Job update failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Job update failed: {str(e)}"
+            detail="Internal server error while updating job"
         )
 
 
@@ -544,13 +592,20 @@ async def delete_job(
         job.deleted_at = datetime.utcnow()
         db.commit()
         
+        # Invalidate cached analytics overview for this tenant
+        try:
+            from app.routers.analytics import invalidate_analytics_cache
+            invalidate_analytics_cache(str(current_user.tenant_id))
+        except Exception:
+            pass
+        
         logger.info(f"Job deleted: {job.title} by {current_user.email}")
         return None
         
     except Exception as e:
         db.rollback()
-        logger.error(f"Job deletion failed: {str(e)}")
+        logger.exception("Job deletion failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Job deletion failed: {str(e)}"
+            detail="Internal server error while deleting job"
         )

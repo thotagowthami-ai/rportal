@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, Index
+from sqlalchemy import Column, String, Text, Integer, DateTime, ForeignKey, Index, Enum
 from sqlalchemy.orm import relationship
 from app.database import Base
 from datetime import datetime
@@ -35,7 +35,7 @@ class JobDescription(Base):
     education_required = Column(String(255))
     employment_type = Column(String(50))
 
-    status = Column(String(50), default=JobStatus.DRAFT.value, nullable=False)
+    status = Column(Enum(JobStatus, native_enum=False), default=JobStatus.DRAFT, nullable=False)
 
     embedding = Column(Text)
 
@@ -60,6 +60,6 @@ class JobDescription(Base):
         else:
             try:
                 skills = json.loads(self.required_skills or "[]")
-            except Exception:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 skills = []
         return f"{self.title}\n{self.description}\nSkills: {', '.join(skills)}"

@@ -63,7 +63,7 @@ class CacheService:
         try:
             scoped_key = self._make_key(key, tenant_id)
             serialized = json.dumps(value)
-            if ttl:
+            if ttl is not None and ttl > 0:
                 self.redis_client.setex(scoped_key, ttl, serialized)
             else:
                 self.redis_client.set(scoped_key, serialized)

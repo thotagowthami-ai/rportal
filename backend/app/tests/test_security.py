@@ -114,8 +114,9 @@ def test_rls_tenant_isolation(db_session):
     db_session.add_all([user1, user2])
     db_session.commit()
     
-    # Enable RLS on users table
+    # Enable RLS on users table and force it for the owner/superuser
     db_session.execute(text("ALTER TABLE users ENABLE ROW LEVEL SECURITY;"))
+    db_session.execute(text("ALTER TABLE users FORCE ROW LEVEL SECURITY;"))
     db_session.execute(text("""
         CREATE POLICY tenant_isolation_policy ON users
         FOR ALL
@@ -162,8 +163,9 @@ def test_rls_fail_closed_on_missing_context(db_session):
     db_session.add(user)
     db_session.commit()
     
-    # Enable RLS
+    # Enable RLS and force it for the owner/superuser
     db_session.execute(text("ALTER TABLE users ENABLE ROW LEVEL SECURITY;"))
+    db_session.execute(text("ALTER TABLE users FORCE ROW LEVEL SECURITY;"))
     db_session.execute(text("""
         CREATE POLICY tenant_isolation_policy ON users
         FOR ALL

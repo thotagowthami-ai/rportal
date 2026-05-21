@@ -125,10 +125,12 @@ async def linkedin_callback(
     _require_linkedin_config()
 
     if error:
-        frontend = _build_frontend_url("/linkedin-generator?linkedin=error")
+        import urllib.parse
+        base_url = _build_frontend_url("/linkedin-generator")
+        params = {"linkedin": "error"}
         if error_description:
-            frontend = f"{frontend}&reason={error_description}"
-        return RedirectResponse(frontend)
+            params["reason"] = error_description
+        return RedirectResponse(f"{base_url}?{urllib.parse.urlencode(params)}")
 
     if not code or not state:
         raise HTTPException(status_code=400, detail="Missing LinkedIn callback params")
@@ -164,23 +166,29 @@ async def linkedin_callback(
             headers=headers,
         )
     if token_resp.status_code >= 400:
-        frontend = _build_frontend_url("/linkedin-generator?linkedin=error&reason=token_exchange_failed")
-        return RedirectResponse(frontend)
+        import urllib.parse
+        base_url = _build_frontend_url("/linkedin-generator")
+        params = {"linkedin": "error", "reason": "token_exchange_failed"}
+        return RedirectResponse(f"{base_url}?{urllib.parse.urlencode(params)}")
 
     token_data = token_resp.json()
     access_token = token_data.get("access_token")
     expires_in = token_data.get("expires_in")
     scope = token_data.get("scope")
     if not access_token:
-        frontend = _build_frontend_url("/linkedin-generator?linkedin=error&reason=missing_access_token")
-        return RedirectResponse(frontend)
+        import urllib.parse
+        base_url = _build_frontend_url("/linkedin-generator")
+        params = {"linkedin": "error", "reason": "missing_access_token"}
+        return RedirectResponse(f"{base_url}?{urllib.parse.urlencode(params)}")
 
     resolved_scope = scope if isinstance(scope, str) and scope.strip() else settings.LINKEDIN_SCOPES
     try:
         linkedin_sub, person_urn = await _get_linkedin_profile(access_token, resolved_scope)
     except HTTPException:
-        frontend = _build_frontend_url("/linkedin-generator?linkedin=error&reason=missing_member_id")
-        return RedirectResponse(frontend)
+        import urllib.parse
+        base_url = _build_frontend_url("/linkedin-generator")
+        params = {"linkedin": "error", "reason": "missing_member_id"}
+        return RedirectResponse(f"{base_url}?{urllib.parse.urlencode(params)}")
     expires_at = None
     if isinstance(expires_in, int):
         expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
@@ -205,7 +213,18 @@ async def linkedin_callback(
         account.expires_at = expires_at
 
     db.commit()
-    redirect_url = _build_frontend_url(f"{return_to}?linkedin=connected")
+    import urllib.parse
+    parsed_return = urllib.parse.urlparse(return_to)
+    query_params = urllib.parse.parse_qsl(parsed_return.query)
+    query_dict = dict(query_params)
+    query_dict["linkedin"] = "connected"
+
+    clean_path = parsed_return.path
+    if not clean_path.startswith("/"):
+        clean_path = "/" + clean_path
+
+    base_url = _build_frontend_url(clean_path)
+    redirect_url = f"{base_url}?{urllib.parse.urlencode(query_dict)}"
     return RedirectResponse(redirect_url)
 
 

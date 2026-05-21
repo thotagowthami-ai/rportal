@@ -10,7 +10,9 @@ from app.schemas.match import MatchResponse, MatchList, MatchUpdate, MatchGenera
 from app.services.matching_service import matching_service
 import math
 from datetime import datetime
+import logging
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/matches", tags=["Matches"])
 
@@ -56,11 +58,17 @@ async def generate_matches(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        logger.exception("Match generation failed")
         error_msg = str(e).lower()
         if "image" in error_msg or "model does not support" in error_msg:
             raise HTTPException(status_code=400, detail="Unable to process candidate data. Please try again later.")
-        raise HTTPException(status_code=500, detail=f"Match generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Match generation failed")
 
+    try:
+        from app.routers.analytics import invalidate_analytics_cache
+        invalidate_analytics_cache(str(current_user.tenant_id))
+    except Exception:
+        pass
     items = [_to_match_response(m) for m in matches]
     return MatchList(
         items=items,
@@ -91,11 +99,17 @@ async def generate_matches_for_selected_resumes(
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
+        logger.exception("Selected match generation failed")
         error_msg = str(e).lower()
         if "image" in error_msg or "model does not support" in error_msg:
             raise HTTPException(status_code=400, detail="Unable to process candidate data. Please try again later.")
-        raise HTTPException(status_code=500, detail=f"Selected match generation failed: {str(e)}")
+        raise HTTPException(status_code=500, detail="Selected match generation failed")
 
+    try:
+        from app.routers.analytics import invalidate_analytics_cache
+        invalidate_analytics_cache(str(current_user.tenant_id))
+    except Exception:
+        pass
     items = [_to_match_response(m) for m in matches]
     return MatchList(
         items=items,
@@ -160,7 +174,8 @@ async def list_matches_for_resume(
         .join(JobDescription, Match.job_description_id == JobDescription.id)
         .filter(
             Match.resume_id == resume_id,
-            Match.tenant_id == current_user.tenant_id
+            Match.tenant_id == current_user.tenant_id,
+            JobDescription.tenant_id == current_user.tenant_id,
         )
     )
 
@@ -233,4 +248,9 @@ async def update_match(
 
     db.commit()
     db.refresh(match)
+    try:
+        from app.routers.analytics import invalidate_analytics_cache
+        invalidate_analytics_cache(str(current_user.tenant_id))
+    except Exception:
+        pass
     return _to_match_response(match)

@@ -255,7 +255,7 @@ async def google_callback(code: str | None = None, state: str | None = None, db:
     stored_source = cache_service.get(key=f"oauth_nonce:{nonce}")
 
     if stored_source is None:
-        logger.warning(f"OAuth CSRF check failed: nonce not found or expired")
+        logger.warning("OAuth CSRF check failed: nonce not found or expired")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OAuth state — please try logging in again")
 
     # Delete nonce immediately — one-time use only
@@ -301,10 +301,30 @@ async def google_callback(code: str | None = None, state: str | None = None, db:
     user = db.query(User).filter(User.email == google_email).first()
 
     if not user:
-        # Create default tenant for Google user if needed
+        # Generate a unique slug for the default tenant to prevent collisions
+        base_slug = f"{google_email.split('@')[0]}-org"
+        import re
+        base_slug = re.sub(r"[^a-zA-Z0-9-]", "", base_slug.replace("_", "-")).lower()
+        if not base_slug:
+            base_slug = "org"
+
+        slug = base_slug
+        counter = 1
+        while True:
+            existing = db.query(Tenant).filter(Tenant.slug == slug).first()
+            if not existing:
+                break
+            import secrets
+            suffix = secrets.token_hex(3)
+            slug = f"{base_slug}-{suffix}"
+            counter += 1
+            if counter > 20:
+                slug = f"{base_slug}-{secrets.token_hex(6)}"
+                break
+
         tenant = Tenant(
             name=f"{google_name}'s Workspace",
-            slug=f"{google_email.split('@')[0]}-org",
+            slug=slug,
             is_active=True,
         )
         db.add(tenant)
@@ -350,8 +370,9 @@ async def google_callback(code: str | None = None, state: str | None = None, db:
             "resumeUrl": None
         })
         user_param = urllib.parse.quote(google_user_json)
+        candidate_base = (settings.CANDIDATE_PORTAL_URL or "http://localhost:5173").rstrip("/")
         # Redirect to Candidate Portal URL with both token and user parameters
-        redirect_url = f"http://localhost:5173/resume?token={token}&user={user_param}"
+        redirect_url = f"{candidate_base}/resume?token={token}&user={user_param}"
     else:
         # Redirect to frontend with token as query param
         redirect_url = f"{FRONTEND_URL}/dashboard?token={token}"

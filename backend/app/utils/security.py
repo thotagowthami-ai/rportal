@@ -37,10 +37,9 @@ def create_access_token(
     else:
         expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     
-    # SECURITY: We encode the user's unique identifier (subject) into the token
-    to_encode = {"exp": expire, "sub": str(subject)}
-    if additional_claims:
-        to_encode.update(additional_claims)
+    # Initialize with additional claims and ensure reserved claims take precedence
+    to_encode = dict(additional_claims or {})
+    to_encode.update({"exp": expire, "sub": str(subject)})
     
     encoded_jwt = jwt.encode(
         to_encode, 

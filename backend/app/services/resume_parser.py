@@ -43,16 +43,36 @@ EDUCATION_KEYWORDS = (
     "computer science", "information technology", "it", "software engineering",
 )
 
-ALLOWED_EXTENSIONS = [".pdf", ".docx", ".doc"]
+ALLOWED_EXTENSIONS = {"pdf", "docx", "doc"}
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 
 
-def validate_file(file_bytes: bytes, filename: str) -> tuple[bool, str]:
-    file_ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if not any(filename.lower().endswith(e) for e in ALLOWED_EXTENSIONS):
-        return False, "Invalid file extension"
-    if len(file_bytes) > MAX_UPLOAD_SIZE:
-        return False, f"File too large. Max size: {MAX_UPLOAD_SIZE // (1024 * 1024)}MB"
+def validate_file(
+    filename: str,
+    file_size: Optional[int] = None,
+    file_bytes: Optional[bytes] = None,
+) -> tuple[bool, str]:
+    filename_lower = filename.lower()
+    file_ext = filename_lower.rsplit(".", 1)[-1] if "." in filename_lower else ""
+    if file_ext not in ALLOWED_EXTENSIONS:
+        return False, f"Unsupported file type: .{file_ext}"
+
+    if file_ext == "doc" and not is_doc_conversion_available():
+        return (
+            False,
+            "Legacy .doc files require LibreOffice installed on the server. Please upload .docx or PDF, or install LibreOffice and ensure 'soffice' is in PATH.",
+        )
+
+    size = file_size
+    if size is None and file_bytes is not None:
+        size = len(file_bytes)
+
+    if size is not None:
+        if size == 0:
+            return False, "Uploaded file is empty"
+        if size > MAX_UPLOAD_SIZE:
+            return False, f"File too large. Max size: {MAX_UPLOAD_SIZE // (1024 * 1024)}MB"
+
     return True, ""
 
 
@@ -248,7 +268,7 @@ def _extract_skills(text: str) -> List[str]:
 
     # Method 2: scan entire text for known skills
     for skill in COMMON_SKILLS:
-        if re.search(r"\b" + re.escape(skill) + r"\b", text_lower):
+        if re.search(r"(?<!\w)" + re.escape(skill) + r"(?!\w)", text_lower):
             skill_normalized = skill
             if skill == "nextjs":
                 skill_normalized = "Next.js"
@@ -366,7 +386,9 @@ def _extract_work_experience(text: str) -> List[Dict[str, str]]:
     # Look for "Experience" or "Work Experience" section
     exp_section_start = -1
     for i, line in enumerate(lines):
-        if "experience" in line.lower() and ("work" in line.lower() or "professional" in line.lower() or "employment" in line.lower()):
+        line_lower = line.lower().strip()
+        # Accept if "experience" alone or with other qualifiers, or standard career/work history headings
+        if "experience" in line_lower or "employment history" in line_lower or "work history" in line_lower:
             exp_section_start = i + 1
             break
     

@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime
 
@@ -66,6 +66,51 @@ class JobDescriptionUpdate(BaseModel):
     education_required: Optional[str] = None
     employment_type: Optional[str] = Field(None, pattern="^(full-time|part-time|contract|internship)$")
     status: Optional[str] = Field(None, pattern="^(draft|active|paused|closed)$")
+
+    @field_validator("requirements", mode="before")
+    @classmethod
+    def validate_requirements(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            stripped = v.strip()
+            if stripped and len(stripped) < 50:
+                raise ValueError("requirements must be at least 50 characters when provided")
+            return stripped
+        return v
+
+    @field_validator("required_skills", mode="before")
+    @classmethod
+    def validate_required_skills(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, list):
+            cleaned = list(set(s.strip() for s in v if isinstance(s, str) and s.strip()))
+            if not cleaned:
+                raise ValueError("required_skills must have at least 1 item after normalization")
+            if len(cleaned) > 50:
+                raise ValueError("required_skills cannot have more than 50 items")
+            return cleaned
+        return v
+
+    @field_validator("preferred_skills", mode="before")
+    @classmethod
+    def validate_preferred_skills(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, list):
+            cleaned = list(set(s.strip() for s in v if isinstance(s, str) and s.strip()))
+            if len(cleaned) > 50:
+                raise ValueError("preferred_skills cannot have more than 50 items")
+            return cleaned
+        return v
+
+    @model_validator(mode="after")
+    def validate_salary_range(self) -> 'JobDescriptionUpdate':
+        if self.salary_min is not None and self.salary_max is not None:
+            if self.salary_max < self.salary_min:
+                raise ValueError("salary_max must be greater than or equal to salary_min")
+        return self
 
 
 class JobDescriptionResponse(BaseModel):

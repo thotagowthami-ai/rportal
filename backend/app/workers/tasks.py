@@ -21,10 +21,13 @@ logger = logging.getLogger(__name__)
 def _mask_email(email: str) -> str:
     """Return a privacy-safe email identifier for logging (never the full address)."""
     try:
+        if "@" not in email:
+            return "***"
         local, domain = email.split("@", 1)
-        return f"{local[0]}***@{domain}"
+        prefix = local[:2] if len(local) >= 2 else local
+        return f"{prefix}***@{domain}"
     except Exception:
-        return "***@***.***"
+        return "***"
 
 
 # ============================================================================
@@ -47,11 +50,8 @@ def send_welcome_email(self, user_email: str, user_name: str):
     logger.info("Sending welcome email to %s", masked)
 
     try:
-        # TODO: Implement actual email sending logic
-        # e.g. asyncio.run(email_service.send_welcome(user_email, user_name))
-
-        logger.info("Welcome email sent successfully to %s", masked)
-        return {"status": "success"}
+        # TODO: Implement actual email sending logic inside email_service
+        raise NotImplementedError("send_welcome_email task is not yet fully implemented.")
 
     except Exception as e:
         logger.error("Failed to send welcome email to %s: %s", masked, e)
@@ -78,10 +78,7 @@ def process_user_data(self, user_id: str):
     async def _run():
         async with TaskSessionManager() as session:  # noqa: F841
             # TODO: fetch user and process data
-            # from app.models.user import User
-            # user = await session.get(User, user_id)
-            logger.info("Data processing completed for user %s", user_id)
-            return {"status": "success", "user_id": user_id}
+            raise NotImplementedError("process_user_data task is not yet fully implemented.")
 
     try:
         return asyncio.run(_run())
@@ -94,14 +91,13 @@ def process_user_data(self, user_id: str):
 # Cleanup Tasks (Scheduled via Celery Beat)
 # ============================================================================
 
-@celery_app.task(name="app.workers.tasks.cleanup_expired_sessions")
-def cleanup_expired_sessions():
+@celery_app.task(base=DatabaseTask, bind=True, name="app.workers.tasks.cleanup_expired_sessions")
+def cleanup_expired_sessions(self):
     """
     Clean up expired sessions from database.
 
     Scheduled task — runs periodically via Celery Beat.
-    Exceptions are intentionally NOT caught here so Celery records the
-    failure correctly and can trigger retries / alerts in monitoring.
+    Exceptions are logged with full stack traces and retried properly.
 
     Example beat schedule:
         celery_app.conf.beat_schedule = {
@@ -116,11 +112,13 @@ def cleanup_expired_sessions():
     async def _run():
         async with TaskSessionManager() as session:  # noqa: F841
             # TODO: delete sessions older than N days
-            logger.info("Session cleanup completed")
-            return {"status": "success"}
+            raise NotImplementedError("cleanup_expired_sessions task is not yet fully implemented.")
 
-    # Let exceptions propagate — Celery handles retries/failure tracking
-    return asyncio.run(_run())
+    try:
+        return asyncio.run(_run())
+    except Exception as e:
+        logger.exception("Session cleanup failed")
+        raise self.retry(exc=e, countdown=300, max_retries=3) from e
 
 
 # ============================================================================
@@ -147,12 +145,7 @@ def generate_report(self, tenant_id: str, report_type: str):
     async def _run():
         async with TaskSessionManager() as session:  # noqa: F841
             # TODO: query data, generate PDF, upload to storage
-            logger.info("Report generated successfully for tenant %s", tenant_id)
-            return {
-                "status": "success",
-                "tenant_id": tenant_id,
-                "report_type": report_type,
-            }
+            raise NotImplementedError("generate_report task is not yet fully implemented.")
 
     try:
         return asyncio.run(_run())

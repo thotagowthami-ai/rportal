@@ -150,10 +150,15 @@ def get_dashboard_metrics(
         )
 
     for event in latest_match_events:
+        score_text = (
+            f"{event.overall_score:.1f}%"
+            if event.overall_score is not None
+            else "pending"
+        )
         activity_items.append(
             {
                 "type": "match_generated",
-                "message": f'Generated {event.overall_score:.1f}% match for "{event.job_title}"',
+                "message": f'Generated {score_text} match for "{event.job_title}"',
                 "timestamp": event.created_at or datetime.utcnow(),
                 "link": f"/jobs/{event.job_id}",
             }
@@ -341,5 +346,30 @@ def get_analytics_overview(
         },
     }
 
-    redis_client.set(cache_key, json.dumps(response_data))
+    redis_client.set(cache_key, json.dumps(response_data), ex=3600)
     return response_data
+
+
+def invalidate_analytics_cache(tenant_id: str) -> None:
+    """
+    Invalidate the analytics overview cache for a specific tenant.
+    
+    Scans and deletes all cache keys matching the pattern:
+    {settings.REDIS_KEY_PREFIX}analytics:overview:{tenant_id}:*
+    """
+    pattern = f"{settings.REDIS_KEY_PREFIX}analytics:overview:{tenant_id}:*"
+    try:
+        # Non-blocking SCAN to find and delete keys matching the pattern securely
+        cursor = 0
+        while True:
+            cursor, keys = redis_client.scan(cursor=cursor, match=pattern, count=100)
+            if keys:
+                redis_client.delete(*keys)
+            if cursor == 0:
+                break
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(
+            f"Failed to invalidate analytics cache for tenant {tenant_id}: {e}"
+        )
+

@@ -103,6 +103,13 @@ def get_current_user_optional(
         User.id == user_id,
         User.tenant_id == tenant_id
     ).first()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     return user
 
 

@@ -381,14 +381,8 @@ Return ONLY a valid JSON object in this exact format:
         if not job:
             raise ValueError(f"Job description {job_id} not found or access denied for tenant {tenant_id}")
 
-        candidate_portal_tenant_id = (
-            settings.CANDIDATE_PORTAL_TENANT_ID or settings.RECRUITING_TENANT_ID
-        )
-        allowed_tenant_ids = [tenant_id]
-        if candidate_portal_tenant_id:
-            allowed_tenant_ids.append(str(candidate_portal_tenant_id))
-        local_resume_count=db.query(Resume).filter(
-            Resume.tenant_id.in_(allowed_tenant_ids)
+        local_resume_count = db.query(Resume).filter(
+            Resume.tenant_id == tenant_id
         ).count()
         logger.info(f"Local resumes count: {local_resume_count}")
 
@@ -471,7 +465,7 @@ Return ONLY a valid JSON object in this exact format:
             selected_resumes = (
                 db.query(Resume)
                 .filter(
-                    Resume.tenant_id.in_(allowed_tenant_ids),
+                    Resume.tenant_id == tenant_id,
                     Resume.id.in_(resume_ids),
                 )
                 .all()
@@ -492,7 +486,7 @@ Return ONLY a valid JSON object in this exact format:
                 )
                 resumes_to_match = (
                     db.query(Resume)
-                    .filter(Resume.tenant_id.in_(allowed_tenant_ids))
+                    .filter(Resume.tenant_id == tenant_id)
                     .order_by(Resume.created_at.desc())
                     .limit(limit * 2)
                     .all()
@@ -509,7 +503,7 @@ Return ONLY a valid JSON object in this exact format:
                         resumes_to_match = (
                             db.query(Resume)
                             .filter(
-                                Resume.tenant_id.in_(allowed_tenant_ids),
+                                Resume.tenant_id == tenant_id,
                                 Resume.id.in_(resume_ids_from_vector),
                             )
                             .all()
@@ -517,7 +511,7 @@ Return ONLY a valid JSON object in this exact format:
                     else:
                         resumes_to_match = (
                             db.query(Resume)
-                            .filter(Resume.tenant_id.in_(allowed_tenant_ids))
+                            .filter(Resume.tenant_id == tenant_id)
                             .order_by(Resume.created_at.desc())
                             .limit(limit * 2)
                             .all()
@@ -527,7 +521,7 @@ Return ONLY a valid JSON object in this exact format:
                     db.rollback()
                     resumes_to_match = (
                         db.query(Resume)
-                        .filter(Resume.tenant_id.in_(allowed_tenant_ids))
+                        .filter(Resume.tenant_id == tenant_id)
                         .order_by(Resume.created_at.desc())
                         .limit(limit * 2)
                         .all()
@@ -718,6 +712,32 @@ Return ONLY a valid JSON object in this exact format:
             return cached
 
         try:
+            def _normalize_skills_list(skills) -> list[str]:
+                if not skills:
+                    return []
+                if isinstance(skills, list):
+                    return [str(s) for s in skills if s]
+                if isinstance(skills, str):
+                    v = skills.strip()
+                    if not v:
+                        return []
+                    if v.startswith("{") and v.endswith("}"):
+                        return [item.strip().strip('"') for item in v[1:-1].split(",") if item.strip()]
+                    if v.startswith("[") and v.endswith("]"):
+                        try:
+                            parsed = json.loads(v)
+                            if isinstance(parsed, list):
+                                return [str(s) for s in parsed if s]
+                        except Exception:
+                            pass
+                    if "," in v:
+                        return [s.strip() for s in v.split(",") if s.strip()]
+                    return [v]
+                return []
+
+            normalized_job_skills = _normalize_skills_list(job.required_skills)
+            normalized_resume_skills = _normalize_skills_list(resume.skills)
+
             is_safe_job, sanitized_job_desc = llm_guard.sanitize_user_input(job.description[:500])
             is_safe_resume, sanitized_resume_text = llm_guard.sanitize_user_input(
                 resume.resume_text[:500] if resume.resume_text else ""
@@ -726,10 +746,10 @@ Return ONLY a valid JSON object in this exact format:
             prompt = f"""Analyze this job-candidate match and explain why they're a good fit in 2-3 sentences.
 
 Job: {sanitized_job_desc}
-Required Skills: {', '.join((job.required_skills or [])[:10])}
+Required Skills: {', '.join(normalized_job_skills[:10])}
 
 Candidate Resume: {sanitized_resume_text}
-Candidate Skills: {', '.join(resume.skills[:10] if resume.skills else [])}
+Candidate Skills: {', '.join(normalized_resume_skills[:10])}
 
 Match Scores:
 - Overall: {scores['overall_score']}%

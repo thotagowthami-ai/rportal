@@ -6,6 +6,7 @@ import logging
 import hashlib
 from typing import List, Optional
 from app.services.cache_service import cache_service
+from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,8 @@ class EmbeddingService:
                     context_type="job_description",
                 )
 
-                response = self.client.messages.create(
+                response = await run_in_threadpool(
+                    self.client.messages.create,
                     model=settings.CLAUDE_MODEL,
                     max_tokens=100,
                     messages=[

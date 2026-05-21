@@ -30,6 +30,7 @@ class AuthService:
             "email": email,
             "tenant_id": tenant_id,
             "role": role,
+            "type": "access",
             "exp": expire,
             "iat": datetime.utcnow()
         }
@@ -71,7 +72,13 @@ class AuthService:
             True if valid, False otherwise
         """
         payload = AuthService.decode_token(token)
-        return payload is not None
+        return bool(
+            payload
+            and payload.get("type") == "access"
+            and payload.get("sub")
+            and payload.get("tenant_id")
+            and payload.get("role")
+        )
 
     @staticmethod
     def create_password_reset_token(user_id: str, email: str) -> str:

@@ -11,6 +11,8 @@ from app.config import settings
 from app.models.user import User
 
 
+from app.utils.llm_guard import llm_guard
+
 router = APIRouter(prefix="/linkedin-posts", tags=["linkedin-posts"])
 
 
@@ -569,7 +571,9 @@ async def _generate_with_gemini(user_input: str, tone: str) -> GeneratePostRespo
     if not settings.GEMINI_API_KEY:
         return None
     model = settings.GEMINI_MODEL or "gemini-2.0-flash"
-    normalized = user_input.strip() if user_input.strip() else "Role: Not specified. Location, stack, and context: not specified."
+    _, sanitized_input = llm_guard.sanitize_user_input(user_input)
+    _, sanitized_tone = llm_guard.sanitize_user_input(tone)
+    normalized = sanitized_input.strip() if sanitized_input.strip() else "Role: Not specified. Location, stack, and context: not specified."
 
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     params = {"key": settings.GEMINI_API_KEY}
@@ -579,7 +583,7 @@ async def _generate_with_gemini(user_input: str, tone: str) -> GeneratePostRespo
                 "role": "user",
                 "parts": [
     {"text": GEMINI_SYSTEM_PROMPT},
-    {"text": f"Tone: {tone}"},
+    {"text": f"Tone: {sanitized_tone}"},
     {"text": "IMPORTANT: Use **double asterisks** for bold text on section headers like '**🛠 Tech stack:**' and '**✅ What you'll do**'. This is required for LinkedIn formatting."},
     {"text": f"Here is the input:\n\n{normalized}"},
 ],
@@ -613,13 +617,15 @@ async def _generate_with_openai(user_input: str, tone: str) -> GeneratePostRespo
     if not settings.OPENAI_API_KEY:
         return None
     model = settings.OPENAI_MODEL or "gpt-4o-mini"
-    normalized = user_input.strip() if user_input.strip() else "Role: Not specified. Location, stack, and context: not specified."
+    _, sanitized_input = llm_guard.sanitize_user_input(user_input)
+    _, sanitized_tone = llm_guard.sanitize_user_input(tone)
+    normalized = sanitized_input.strip() if sanitized_input.strip() else "Role: Not specified. Location, stack, and context: not specified."
 
     payload = {
         "model": model,
         "messages": [
     {"role": "system", "content": OPENAI_SYSTEM_PROMPT},
-    {"role": "user", "content": f"Tone: {tone}\n\nIMPORTANT: Use **double asterisks** for bold text on section headers like '**🛠 Tech stack:**' and '**✅ What you'll do**'. This is required for LinkedIn formatting.\n\nInput:\n{normalized}"},
+    {"role": "user", "content": f"Tone: {sanitized_tone}\n\nIMPORTANT: Use **double asterisks** for bold text on section headers like '**🛠 Tech stack:**' and '**✅ What you'll do**'. This is required for LinkedIn formatting.\n\nInput:\n{normalized}"},
 ],
         "temperature": 0.7,
     }
@@ -649,11 +655,13 @@ async def _generate_with_deepseek(user_input: str, tone: str) -> GeneratePostRes
     if not settings.OPENROUTER_API_KEY:
         return None
     model = settings.OPENROUTER_MODEL or "deepseek/deepseek-chat"
-    normalized = user_input.strip() if user_input.strip() else "Role: Not specified. Location, stack, and context: not specified."
+    _, sanitized_input = llm_guard.sanitize_user_input(user_input)
+    _, sanitized_tone = llm_guard.sanitize_user_input(tone)
+    normalized = sanitized_input.strip() if sanitized_input.strip() else "Role: Not specified. Location, stack, and context: not specified."
 
     prompt = (
     "You are a LinkedIn content writer. Turn the following job description into a short, high-converting LinkedIn job post.\n\n"
-    f"Tone: {tone}\n"
+    f"Tone: {sanitized_tone}\n"
     "Constraints:\n"
     "- Hook-first, human, founder-style\n"
     "- Short lines, frequent breaks\n"

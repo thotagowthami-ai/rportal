@@ -99,7 +99,15 @@ class User(Base):
             UserRole.RECRUITER.value: 2,
             UserRole.ADMIN.value: 3,
         }
-        return role_hierarchy[self.role] >= role_hierarchy[required_role.value]
+        current_role_val = self.role.value if hasattr(self.role, "value") else str(self.role)
+        if current_role_val not in role_hierarchy:
+            import logging
+            logging.getLogger(__name__).warning("Unrecognized user role: %s", current_role_val)
+            return False
+
+        current = role_hierarchy[current_role_val]
+        required = role_hierarchy.get(required_role.value, 0)
+        return current >= required
 
     @property
     def is_admin(self) -> bool:

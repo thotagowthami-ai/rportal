@@ -87,6 +87,28 @@ class Settings(BaseSettings):
         env_file = str(ENV_FILE)
         case_sensitive = True
 
+    def __init__(self, **values):
+        super().__init__(**values)
+        
+        import secrets
+        import warnings
+        
+        is_dev = self.ENVIRONMENT in ("development", "local", "test") or self.DEBUG
+        insecure_key = "dev-secret-key-CHANGE-IN-PRODUCTION"
+        
+        if not self.JWT_SECRET_KEY or self.JWT_SECRET_KEY == insecure_key:
+            if not is_dev:
+                raise RuntimeError(
+                    "JWT_SECRET_KEY must be explicitly set via environment variables in production"
+                )
+            else:
+                self.JWT_SECRET_KEY = secrets.token_urlsafe(32)
+                warnings.warn(
+                    "JWT_SECRET_KEY was unset or insecure. A secure, random key has been "
+                    "generated for local development. Note: Tokens will invalidate on restart.",
+                    UserWarning
+                )
+
     @property
     def async_database_url(self) -> str:
         if not self.DATABASE_URL:

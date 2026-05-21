@@ -298,8 +298,8 @@ class SentryContextMiddleware(BaseHTTPMiddleware):
                 })
                 scope.set_tag("tenant_id", str(user.tenant_id))
             
-            # Add custom context
-            scope.set_extra("url", str(request.url))
+            # Add custom context (strip query parameters to avoid leaking tokens in Sentry)
+            scope.set_extra("url", str(request.url.replace(query="")))
             scope.set_extra("client_host", request.client.host if request.client else None)
             
             try:

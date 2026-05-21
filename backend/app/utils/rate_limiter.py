@@ -13,6 +13,7 @@ Features:
 
 import time
 import logging
+import uuid
 from typing import Optional, Tuple
 from functools import wraps
 import redis.asyncio as redis
@@ -88,8 +89,9 @@ class RateLimiter:
             # Count requests in current window
             pipe.zcard(key)
             
-            # Add current request
-            pipe.zadd(key, {str(current_time): current_time})
+            # Add current request with a unique member to avoid collision-overwrites on duplicate timestamps
+            unique_member = f"{current_time}:{uuid.uuid4().hex}"
+            pipe.zadd(key, {unique_member: current_time})
             
             # Set expiry on the key
             pipe.expire(key, window_seconds)
@@ -210,8 +212,8 @@ def get_rate_limit_tier(user_tier: Optional[str] = None) -> Tuple[int, int]:
 
 async def check_user_rate_limit(
     request: Request,
-    user_id: str,
-    user_tier: str = "free"
+    user_id: Optional[str] = None,
+    user_tier: Optional[str] = None
 ) -> None:
     """
     Dependency to check user-specific rate limits.
@@ -226,14 +228,26 @@ async def check_user_rate_limit(
     
     Args:
         request: FastAPI request object
-        user_id: User's unique identifier
-        user_tier: User's subscription tier
+        user_id: User's unique identifier (optional, will extract from state if None)
+        user_tier: User's subscription tier (optional)
     
     Raises:
         HTTPException: If rate limit is exceeded
     """
-    max_requests, window_seconds = get_rate_limit_tier(user_tier)
-    rate_limit_key = f"{settings.REDIS_KEY_PREFIX}rate_limit:user:{user_id}"
+    # Extract user information from request state if not explicitly passed
+    current_user = getattr(request.state, "user", None)
+    
+    resolved_user_id = user_id or (str(current_user.id) if current_user and hasattr(current_user, "id") else None)
+    resolved_user_tier = user_tier or (getattr(current_user, "tier", "free") if current_user else "free")
+    
+    # If no authenticated user is found, fallback to IP-based rate limiting
+    if not resolved_user_id:
+        client_ip = request.client.host if request.client else "unknown"
+        rate_limit_key = f"{settings.REDIS_KEY_PREFIX}rate_limit:user_fallback:{client_ip}"
+        max_requests, window_seconds = 100, 3600  # Fallback to hourly limit
+    else:
+        max_requests, window_seconds = get_rate_limit_tier(resolved_user_tier)
+        rate_limit_key = f"{settings.REDIS_KEY_PREFIX}rate_limit:user:{resolved_user_id}"
     
     is_allowed, headers = await rate_limiter.check_rate_limit(
         rate_limit_key,
@@ -277,7 +291,7 @@ def rate_limit(max_requests: int = 60, window_seconds: int = 60):
                         request = arg
                         break
             
-                if request:
+            if request:
                 client_ip = request.client.host if request.client else "unknown"
                 rate_limit_key = f"{settings.REDIS_KEY_PREFIX}rate_limit:endpoint:{func.__name__}:{client_ip}"
                 
@@ -299,3 +313,4 @@ def rate_limit(max_requests: int = 60, window_seconds: int = 60):
             return await func(*args, **kwargs)
         return wrapper
     return decorator
+

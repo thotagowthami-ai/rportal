@@ -6,7 +6,7 @@ from app.database import get_db, set_tenant_context
 from app.api.deps import get_current_user
 from app.models.resume import Resume
 from app.models.user import User
-from app.services.resume_parser import extract_resume_text, parse_resume_text, is_doc_conversion_available
+from app.services.resume_parser import extract_resume_text, parse_resume_text, is_doc_conversion_available, validate_file
 import uuid
 import os
 import json
@@ -202,6 +202,11 @@ async def sync_resumes(
             tenant_id=str(current_user.tenant_id),
             uploaded_by=str(current_user.id),
         )
+        try:
+            from app.routers.analytics import invalidate_analytics_cache
+            invalidate_analytics_cache(str(current_user.tenant_id))
+        except Exception:
+            pass
         return {
             "message": f"Successfully synced {len(resumes)} resumes from Candidate Portal.",
             "count": len(resumes),
@@ -223,22 +228,16 @@ async def upload_resume(
 ):
     set_tenant_context(db, str(current_user.tenant_id))
     
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file uploaded")
-
-    file_ext = os.path.splitext(file.filename)[1].lstrip(".").lower()[:50] or "unknown"
-    ALLOWED_EXTENSIONS = {"pdf", "docx", "doc"}
-    if file_ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"Unsupported file type: .{file_ext}")
-    if file_ext == "doc" and not is_doc_conversion_available():
-        raise HTTPException(
-            status_code=400,
-            detail="Legacy .doc files require LibreOffice installed on the server. Please upload .docx or PDF, or install LibreOffice and ensure 'soffice' is in PATH.",
-        )
+    # Validate file size and extension centrally before reading into memory to prevent DoS memory exhaustion
+    file_size = getattr(file, "size", None)
+    is_valid, err_msg = validate_file(file.filename, file_size=file_size)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=err_msg)
 
     file_bytes = await file.read()
-    if not file_bytes:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
+    is_valid_bytes, err_bytes_msg = validate_file(file.filename, file_bytes=file_bytes)
+    if not is_valid_bytes:
+        raise HTTPException(status_code=400, detail=err_bytes_msg)
 
     content_type = file.content_type or ""
     file_path = storage_service.upload_bytes(
@@ -285,6 +284,11 @@ async def upload_resume(
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to save resume: {str(e)}")
     db.refresh(resume)
+    try:
+        from app.routers.analytics import invalidate_analytics_cache
+        invalidate_analytics_cache(str(current_user.tenant_id))
+    except Exception:
+        pass
     return _serialize_resume(resume)
 
 
@@ -307,19 +311,15 @@ async def upload_multiple_resumes(
     created_resumes = []
 
     for file in files:
-        if not file.filename:
-            continue
-        file_ext = os.path.splitext(file.filename)[1].lstrip(".").lower()[:50] or "unknown"
-        if file_ext not in ALLOWED_EXTENSIONS:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type: .{file_ext}")
-        if file_ext == "doc" and not is_doc_conversion_available():
-            raise HTTPException(
-                status_code=400,
-                detail="Legacy .doc files require LibreOffice installed on the server. Please upload .docx or PDF, or install LibreOffice and ensure 'soffice' is in PATH.",
-            )
+        # Validate file size and extension centrally before reading into memory to prevent DoS memory exhaustion
+        file_size = getattr(file, "size", None)
+        is_valid, err_msg = validate_file(file.filename, file_size=file_size)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=err_msg)
 
         file_bytes = await file.read()
-        if not file_bytes:
+        is_valid_bytes, err_bytes_msg = validate_file(file.filename, file_bytes=file_bytes)
+        if not is_valid_bytes:
             continue
 
         content_type = file.content_type or ""
@@ -371,6 +371,11 @@ async def upload_multiple_resumes(
 
     for resume in created_resumes:
         db.refresh(resume)
+    try:
+        from app.routers.analytics import invalidate_analytics_cache
+        invalidate_analytics_cache(str(current_user.tenant_id))
+    except Exception:
+        pass
 
     return [_serialize_resume(r) for r in created_resumes]
 
@@ -399,12 +404,19 @@ async def public_apply_job(
     set_tenant_context(db, str(job.tenant_id))
 
     # 2. Extract & Save Resume
-    file_ext = os.path.splitext(file.filename)[1].lstrip(".").lower()[:50] or "unknown"
-    ALLOWED_EXTENSIONS = {"pdf", "docx", "doc"}
-    if file_ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"Unsupported file type: .{file_ext}")
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="No file uploaded")
+
+    # Validate file size and extension centrally before reading into memory to prevent DoS memory exhaustion
+    file_size = getattr(file, "size", None)
+    is_valid, err_msg = validate_file(file.filename, file_size=file_size)
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=err_msg)
 
     file_bytes = await file.read()
+    is_valid_bytes, err_bytes_msg = validate_file(file.filename, file_bytes=file_bytes)
+    if not is_valid_bytes:
+        raise HTTPException(status_code=400, detail=err_bytes_msg)
     file_path = storage_service.upload_bytes(
         file_bytes, file.filename, content_type=file.content_type or "", prefix="resumes"
     )
@@ -445,6 +457,11 @@ async def public_apply_job(
     db.add(resume)
     db.commit()
     db.refresh(resume)
+    try:
+        from app.routers.analytics import invalidate_analytics_cache
+        invalidate_analytics_cache(str(job.tenant_id))
+    except Exception:
+        pass
 
     # 5. Trigger Matching
     try:
@@ -512,6 +529,11 @@ def re_analyze_resume(
 
     db.commit()
     db.refresh(resume)
+    try:
+        from app.routers.analytics import invalidate_analytics_cache
+        invalidate_analytics_cache(str(resume.tenant_id))
+    except Exception:
+        pass
     return _serialize_resume(resume)
 
 
@@ -648,6 +670,11 @@ def delete_resume(
 
     resume.deleted_at = datetime.utcnow()
     db.commit()
+    try:
+        from app.routers.analytics import invalidate_analytics_cache
+        invalidate_analytics_cache(str(resume.tenant_id))
+    except Exception:
+        pass
     return {"message": "Resume deleted successfully"}
 
 

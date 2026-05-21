@@ -20,8 +20,19 @@ from app.main import app
 from app.database import Base, get_db
 
 # Test database URL (use separate test database)
-TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "postgresql://postgres:postgres@localhost:5433/recruiting_db")
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
+if not TEST_DATABASE_URL:
+    raise RuntimeError("TEST_DATABASE_URL environment variable is required")
 
+def _validate_test_db_url(url: str):
+    if not url or "test" not in url.lower():
+        raise RuntimeError(
+            f"Unsafe database URL detected: '{url}'. "
+            "TEST_DATABASE_URL must point to an isolated test database containing 'test' keyword."
+        )
+
+# Fail fast at engine creation time
+_validate_test_db_url(TEST_DATABASE_URL)
 engine = create_engine(TEST_DATABASE_URL)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -29,6 +40,8 @@ TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engin
 @pytest.fixture(scope="function")
 def db_session():
     """Create a fresh database for each test"""
+    # Enforce check before any database extends/modifications
+    _validate_test_db_url(TEST_DATABASE_URL)
     with engine.connect() as conn:
         try:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
@@ -55,6 +68,7 @@ def db_session():
         yield db
     finally:
         db.close()
+        _validate_test_db_url(TEST_DATABASE_URL)
         Base.metadata.drop_all(bind=engine)
 
 

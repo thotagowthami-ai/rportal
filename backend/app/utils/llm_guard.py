@@ -55,11 +55,14 @@ class LLMGuard:
             return True, ""
         
         is_safe = True
-        for pattern in self.compiled_patterns:
+        for idx, pattern in enumerate(self.compiled_patterns):
             match = pattern.search(user_text)
             if match:
-                matched = match.group(0)
-                logger.warning(f"Potential prompt injection detected: {matched[:100]}...")
+                logger.warning(
+                    "Potential prompt injection detected: pattern_idx=%d, match_len=%d",
+                    idx,
+                    len(match.group(0)),
+                )
                 is_safe = False
                 break
         
