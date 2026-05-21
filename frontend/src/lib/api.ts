@@ -1,7 +1,10 @@
 // frontend/src/lib/api.ts
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
-if (!API_BASE_URL) {
-  throw new Error("NEXT_PUBLIC_API_URL is required");
+function getApiBaseUrl(): string {
+  const base = process.env.NEXT_PUBLIC_API_URL;
+  if (!base) {
+    throw new Error("NEXT_PUBLIC_API_URL is required");
+  }
+  return base;
 }
 
 function getAuthHeaders(): Record<string, string> {
@@ -13,7 +16,7 @@ function getAuthHeaders(): Record<string, string> {
 }
 
 function buildUrl(endpoint: string, params?: Record<string, string | number | boolean | undefined>): string {
-  const url = new URL(`${API_BASE_URL}${endpoint}`);
+  const url = new URL(`${getApiBaseUrl()}${endpoint}`);
   if (params) {
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined && value !== null) {
@@ -51,6 +54,12 @@ function handleAuthError(response: Response): void {
   }
 }
 
+async function parseJsonSafe<T>(response: Response): Promise<T | null> {
+  if (response.status === 204 || response.status === 205) return null;
+  const text = await response.text();
+  return text ? (JSON.parse(text) as T) : null;
+}
+
 class ApiClient {
   async get<T>(
     endpoint: string,
@@ -69,8 +78,8 @@ class ApiClient {
       throw await parseError(response);
     }
 
-    const data: T = await response.json();
-    return { data };
+    const data = await parseJsonSafe<T>(response);
+    return { data: data as T };
   }
   async getBlob(
   endpoint: string,
@@ -92,7 +101,7 @@ class ApiClient {
 }
 
   async post<T, B = unknown>(endpoint: string, body: B): Promise<{ data: T }> {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const response = await fetch(`${getApiBaseUrl()}${endpoint}`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -106,12 +115,12 @@ class ApiClient {
       throw await parseError(response);
     }
 
-    const data: T = await response.json();
-    return { data };
+    const data = await parseJsonSafe<T>(response);
+    return { data: data as T };
   }
 
   async postForm<T>(endpoint: string, formData: FormData): Promise<{ data: T }> {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const response = await fetch(`${getApiBaseUrl()}${endpoint}`, {
       method: "POST",
       headers: {
         ...getAuthHeaders(),
@@ -124,12 +133,12 @@ class ApiClient {
       throw await parseError(response);
     }
 
-    const data: T = await response.json();
-    return { data };
+    const data = await parseJsonSafe<T>(response);
+    return { data: data as T };
   }
 
   async patch<T, B = unknown>(endpoint: string, body: B): Promise<{ data: T }> {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const response = await fetch(`${getApiBaseUrl()}${endpoint}`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
@@ -143,12 +152,12 @@ class ApiClient {
       throw await parseError(response);
     }
 
-    const data: T = await response.json();
-    return { data };
+    const data = await parseJsonSafe<T>(response);
+    return { data: data as T };
   }
 
   async delete(endpoint: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    const response = await fetch(`${getApiBaseUrl()}${endpoint}`, {
       method: "DELETE",
       headers: {
         ...getAuthHeaders(),

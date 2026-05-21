@@ -1,6 +1,10 @@
 import { test, expect } from '@playwright/test';
 
-const baseURL = process.env.PLAYWRIGHT_BASE_URL || 'https://recruit-app-v1-5itoz54is-ven010s-projects.vercel.app';
+const baseURL = process.env.PLAYWRIGHT_BASE_URL;
+
+if (!baseURL) {
+  throw new Error("PLAYWRIGHT_BASE_URL is required for smoke tests");
+}
 
 test('@smoke login page loads', async ({ page }) => {
   await page.goto(`${baseURL}/login`);

@@ -427,7 +427,7 @@ export default function CandidateProfilePage() {
                 <p className="text-[#515f74]">This candidate hasn't been matched to any jobs yet.</p>
               </div>
             ) : (
-              matches
+              [...matches]
                 .sort((a, b) => b.overall_score - a.overall_score)
                 .map((match, idx) => {
                   const job = jobs[match.job_description_id];

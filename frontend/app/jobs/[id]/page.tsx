@@ -175,7 +175,7 @@ export default function JobDetailPage() {
         location: jobRes.data.location || "",
         salary_min: jobRes.data.salary_min ?? undefined,
         salary_max: jobRes.data.salary_max ?? undefined,
-        experience_required: jobRes.data.experience_required || undefined,
+        experience_required: jobRes.data.experience_required ?? undefined,
         education_required: jobRes.data.education_required || "",
         employment_type: jobRes.data.employment_type || undefined,
         status: jobRes.data.status,
@@ -302,13 +302,13 @@ export default function JobDetailPage() {
     }
   };
 
-  const onSaveMatch = async (matchId: string, override?: MatchDraft) => {
+  const onSaveMatch = async (matchId: string, override?: MatchDraft): Promise<boolean> => {
     if (!canReview) {
       toast.error("Your role cannot update match review.");
-      return;
+      return false;
     }
     const draft = override || matchDrafts[matchId];
-    if (!draft) return;
+    if (!draft) return false;
     const previousMatches = matches;
     const previousMatch = matches.find((match) => match.id === matchId);
     setMatches((current) =>
@@ -333,6 +333,7 @@ export default function JobDetailPage() {
         }
       );
       toast.success("Match updated");
+      return true;
     } catch (err) {
       setMatches(previousMatches);
       if (previousMatch) {
@@ -346,6 +347,7 @@ export default function JobDetailPage() {
       }
       setError(err instanceof Error ? err.message : "Failed to update match");
       toast.error(err instanceof Error ? err.message : "Failed to update match");
+      return false;
     } finally {
       setUpdatingMatchId(null);
     }
@@ -462,6 +464,7 @@ export default function JobDetailPage() {
       return;
     }
 
+    let failed = 0;
     for (const id of selectedMatchIds) {
       const notes = matchDrafts[id]?.recruiter_notes || "";
       const nextDraft: MatchDraft = {
@@ -472,11 +475,16 @@ export default function JobDetailPage() {
         ...current,
         [id]: nextDraft,
       }));
-      await onSaveMatch(id, nextDraft);
+      const ok = await onSaveMatch(id, nextDraft);
+      if (!ok) failed += 1;
     }
 
     setSelectedMatchIds([]);
-    toast.success("Bulk action applied");
+    if (failed === 0) {
+      toast.success("Bulk action applied");
+    } else {
+      toast.error(`${failed} update(s) failed during bulk action.`);
+    }
   };
 
   const exportMatchesCsv = () => {
@@ -583,7 +591,7 @@ export default function JobDetailPage() {
                     </span>
                      <span className="text-[#515f74] text-sm">📍 {job.location || "Remote"}</span>
 <span className="text-[#515f74] text-sm">💼 {job.employment_type || "Full-time"}</span>
-{job.experience_required && (
+{job.experience_required != null && (
   <span className="text-[#515f74] text-sm">📅 {job.experience_required}+ years</span>
 )}
                   </div>
@@ -591,9 +599,9 @@ export default function JobDetailPage() {
                     <div className="mt-4 p-4 bg-[#f8f3ee] rounded-lg">
                       <p className="text-sm text-[#515f74]">Salary Range</p>
                       <p className="text-xl font-bold text-[#3525cd]">
-                        {job.salary_min ? `â‚¹${job.salary_min.toLocaleString()}` : ""}{" "}
-                        {job.salary_min && job.salary_max ? "â€”" : ""}{" "}
-                        {job.salary_max ? `â‚¹${job.salary_max.toLocaleString()}` : ""}
+                        {job.salary_min ? `₹${job.salary_min.toLocaleString()}` : ""}{" "}
+                        {job.salary_min && job.salary_max ? "—" : ""}{" "}
+                        {job.salary_max ? `₹${job.salary_max.toLocaleString()}` : ""}
                       </p>
                     </div>
                   )}

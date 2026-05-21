@@ -176,8 +176,9 @@ export default function PublicJobDetailPage() {
                 </div>
                 <form onSubmit={handleSubmit} className="p-6 space-y-5">
                   <div>
-                    <label className="text-xs font-bold text-[#1d1b19] uppercase tracking-wider block mb-2">Full Name</label>
+                    <label htmlFor="candidate-name" className="text-xs font-bold text-[#1d1b19] uppercase tracking-wider block mb-2">Full Name</label>
                     <input
+                      id="candidate-name"
                       required
                       type="text"
                       placeholder="Jane Doe"
@@ -187,8 +188,9 @@ export default function PublicJobDetailPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-[#1d1b19] uppercase tracking-wider block mb-2">Email Address</label>
+                    <label htmlFor="candidate-email" className="text-xs font-bold text-[#1d1b19] uppercase tracking-wider block mb-2">Email Address</label>
                     <input
+                      id="candidate-email"
                       required
                       type="email"
                       placeholder="jane@example.com"
@@ -198,8 +200,9 @@ export default function PublicJobDetailPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-[#1d1b19] uppercase tracking-wider block mb-2">Phone (Optional)</label>
+                    <label htmlFor="candidate-phone" className="text-xs font-bold text-[#1d1b19] uppercase tracking-wider block mb-2">Phone (Optional)</label>
                     <input
+                      id="candidate-phone"
                       type="tel"
                       placeholder="+1 (555) 000-0000"
                       value={phone}
@@ -208,9 +211,10 @@ export default function PublicJobDetailPage() {
                     />
                   </div>
                   <div>
-                    <label className="text-xs font-bold text-[#1d1b19] uppercase tracking-wider block mb-2">Resume (PDF)</label>
+                    <label htmlFor="candidate-resume" className="text-xs font-bold text-[#1d1b19] uppercase tracking-wider block mb-2">Resume (PDF)</label>
                     <div className="relative group">
                       <input
+                        id="candidate-resume"
                         required
                         type="file"
                         accept=".pdf"

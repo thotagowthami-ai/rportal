@@ -100,6 +100,14 @@ export default function ResumesPage() {
       return;
     }
 
+    if (
+      selectedFiles.length > 1 &&
+      (candidateName || candidateEmail || candidatePhone)
+    ) {
+      setUploadMessage("Candidate details can only be used with a single resume upload.");
+      return;
+    }
+
     setUploadMessage("Uploading...");
     const formData = new FormData();
     selectedFiles.forEach((file) => formData.append("files", file));

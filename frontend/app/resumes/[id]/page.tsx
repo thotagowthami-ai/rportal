@@ -95,38 +95,34 @@ export default function ResumeDetailPage() {
     return "Not specified";
   }, [resume]);
 
-  const getPdfUrlWithToken = () => {
-    const token = localStorage.getItem("token") || sessionStorage.getItem("token");
-    if (!resumeId || !token) return "";
-    return `${API_BASE_URL}/api/resumes/${resumeId}/download?token=${encodeURIComponent(token)}`;
-  };
-
-  const onView = () => {
-    const pdfUrl = getPdfUrlWithToken();
-    if (!pdfUrl) {
+  const onView = async () => {
+    if (!resumeId) {
       toast.error("Please sign in again");
       return;
     }
-    const previewWindow = window.open(pdfUrl, "_blank", "noopener,noreferrer");
-    if (!previewWindow) {
-      toast.error("Popup blocked. Please allow popups or use Download.");
+
+    try {
+      const blob = await api.getBlob(`/api/resumes/${resumeId}/download`);
+      const url = window.URL.createObjectURL(blob);
+      const previewWindow = window.open(url, "_blank", "noopener,noreferrer");
+      // Revoke after 60s to allow PDF to fully load in new tab
+      setTimeout(() => window.URL.revokeObjectURL(url), 60000);
+      if (!previewWindow) {
+        toast.error("Popup blocked. Please allow popups or use Download.");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to load PDF preview");
     }
   };
 
   const onDownload = async () => {
-    const url = getPdfUrlWithToken();
-    if (!url || !resume) {
+    if (!resumeId || !resume) {
       toast.error("No resume available");
       return;
     }
 
     try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || "Download failed");
-      }
-      const blob = await response.blob();
+      const blob = await api.getBlob(`/api/resumes/${resumeId}/download`);
       const downloadUrl = window.URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = downloadUrl;

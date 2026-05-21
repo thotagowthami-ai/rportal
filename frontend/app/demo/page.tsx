@@ -116,19 +116,19 @@ export default function DemoPage() {
                  >
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
-                        <label className="text-[0.7rem] font-bold text-[#1d1b19] uppercase tracking-wider ml-1">Full Name</label>
-                        <input required type="text" placeholder="John Doe" className="w-full bg-[#fdfaf7] border border-[#f0e8e0] focus:border-[#3525cd] focus:ring-1 focus:ring-[#3525cd] rounded-xl px-5 py-4 text-sm transition-all outline-none" />
+                        <label htmlFor="fullNameInput" className="text-[0.7rem] font-bold text-[#1d1b19] uppercase tracking-wider ml-1">Full Name</label>
+                        <input id="fullNameInput" required type="text" placeholder="John Doe" className="w-full bg-[#fdfaf7] border border-[#f0e8e0] focus:border-[#3525cd] focus:ring-1 focus:ring-[#3525cd] rounded-xl px-5 py-4 text-sm transition-all outline-none" />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[0.7rem] font-bold text-[#1d1b19] uppercase tracking-wider ml-1">Work Email</label>
-                        <input required type="email" placeholder="john@company.com" className="w-full bg-[#fdfaf7] border border-[#f0e8e0] focus:border-[#3525cd] focus:ring-1 focus:ring-[#3525cd] rounded-xl px-5 py-4 text-sm transition-all outline-none" />
+                        <label htmlFor="workEmailInput" className="text-[0.7rem] font-bold text-[#1d1b19] uppercase tracking-wider ml-1">Work Email</label>
+                        <input id="workEmailInput" required type="email" placeholder="john@company.com" className="w-full bg-[#fdfaf7] border border-[#f0e8e0] focus:border-[#3525cd] focus:ring-1 focus:ring-[#3525cd] rounded-xl px-5 py-4 text-sm transition-all outline-none" />
                       </div>
                    </div>
 
                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
-                        <label className="text-[0.7rem] font-bold text-[#1d1b19] uppercase tracking-wider ml-1">Company Size</label>
-                        <select className="w-full bg-[#fdfaf7] border border-[#f0e8e0] focus:border-[#3525cd] focus:ring-1 focus:ring-[#3525cd] rounded-xl px-5 py-4 text-sm outline-none appearance-none cursor-pointer">
+                        <label htmlFor="companySizeSelect" className="text-[0.7rem] font-bold text-[#1d1b19] uppercase tracking-wider ml-1">Company Size</label>
+                        <select id="companySizeSelect" className="w-full bg-[#fdfaf7] border border-[#f0e8e0] focus:border-[#3525cd] focus:ring-1 focus:ring-[#3525cd] rounded-xl px-5 py-4 text-sm outline-none appearance-none cursor-pointer">
                           <option>1-50 employees</option>
                           <option>51-200 employees</option>
                           <option>201-500 employees</option>
@@ -136,14 +136,14 @@ export default function DemoPage() {
                         </select>
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[0.7rem] font-bold text-[#1d1b19] uppercase tracking-wider ml-1">Role</label>
-                        <input type="text" placeholder="Hiring Manager" className="w-full bg-[#fdfaf7] border border-[#f0e8e0] focus:border-[#3525cd] focus:ring-1 focus:ring-[#3525cd] rounded-xl px-5 py-4 text-sm transition-all outline-none" />
+                        <label htmlFor="roleInput" className="text-[0.7rem] font-bold text-[#1d1b19] uppercase tracking-wider ml-1">Role</label>
+                        <input id="roleInput" type="text" placeholder="Hiring Manager" className="w-full bg-[#fdfaf7] border border-[#f0e8e0] focus:border-[#3525cd] focus:ring-1 focus:ring-[#3525cd] rounded-xl px-5 py-4 text-sm transition-all outline-none" />
                       </div>
                    </div>
 
                    <div className="space-y-2">
-                     <label className="text-[0.7rem] font-bold text-[#1d1b19] uppercase tracking-wider ml-1">How can we help you?</label>
-                     <textarea required rows={4} placeholder="I'm interested in AI matching for our engineering roles..." className="w-full bg-[#fdfaf7] border border-[#f0e8e0] focus:border-[#3525cd] focus:ring-1 focus:ring-[#3525cd] rounded-xl px-5 py-4 text-sm transition-all outline-none resize-none" />
+                     <label htmlFor="helpTextarea" className="text-[0.7rem] font-bold text-[#1d1b19] uppercase tracking-wider ml-1">How can we help you?</label>
+                     <textarea id="helpTextarea" required rows={4} placeholder="I'm interested in AI matching for our engineering roles..." className="w-full bg-[#fdfaf7] border border-[#f0e8e0] focus:border-[#3525cd] focus:ring-1 focus:ring-[#3525cd] rounded-xl px-5 py-4 text-sm transition-all outline-none resize-none" />
                    </div>
                    
                    <button type="submit" className="group w-full bg-[#3525cd] text-white font-bold py-5 rounded-2xl shadow-xl shadow-[#3525cd]/20 hover:bg-[#1d1b19] transform hover:-translate-y-1 transition-all duration-300 flex items-center justify-center gap-3 text-lg">

@@ -13,5 +13,8 @@ COPY . .
 # Expose Next.js dev port
 EXPOSE 3000
 
+# Drop root privileges
+USER node
+
 # Run dev server with hot-reload
 CMD ["npm", "run", "dev"]

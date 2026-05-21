@@ -53,21 +53,14 @@ export default function ForgotPasswordPage() {
       });
 
       if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(
-          data?.detail ||
-            data?.message ||
-            "Password reset isn't available yet. Please contact your admin."
-        );
+        throw new Error("If an account exists for that email, you'll receive a reset link shortly.");
       }
 
       setSuccess("If an account exists for that email, you'll receive a reset link shortly.");
     } catch (error) {
+      console.error("Forgot password request failed:", error);
       setErrors({
-        form:
-          error instanceof Error
-            ? error.message
-            : "Password reset isn't available yet. Please contact your admin.",
+        form: "If an account exists for that email, you'll receive a reset link shortly.",
       });
     } finally {
       setIsLoading(false);

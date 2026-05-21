@@ -10,6 +10,7 @@ type FormErrors = {
 };
 
 export default function LoginPage() {
+  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -46,9 +47,17 @@ export default function LoginPage() {
   };
 
   const handleGoogleSignIn = () => {
+    if (!apiBaseUrl) {
+      setErrors({
+        form: "Authentication service is not configured.",
+      });
+      setGoogleLoading(false);
+      return;
+    }
+
     try {
       setGoogleLoading(true);
-      window.location.href = `${process.env.NEXT_PUBLIC_API_URL}/api/auth/google`;
+      window.location.href = `${apiBaseUrl}/api/auth/google`;
     } catch {
       setErrors({
         form: "Google sign-in is not available right now.",
@@ -66,12 +75,19 @@ export default function LoginPage() {
 
     if (Object.keys(nextErrors).length > 0) return;
 
+    if (!apiBaseUrl) {
+      setErrors({
+        form: "Authentication service is not configured.",
+      });
+      return;
+    }
+
     try {
       setIsLoading(true);
       setErrors({});
 
       const res = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/api/auth/login`,
+        `${apiBaseUrl}/api/auth/login`,
         {
           method: "POST",
           headers: {

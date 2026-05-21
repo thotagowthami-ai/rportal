@@ -25,10 +25,7 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL;
-if (!API_BASE_URL) {
-  throw new Error("NEXT_PUBLIC_API_URL is required");
-}
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || undefined;
 
 function makeTenantSlug(input: string): string {
   return input
@@ -46,13 +43,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const checkAuth = async () => {
-      // Capture token from URL if present (e.g. from Google OAuth callback)
-      const urlParams = new URLSearchParams(window.location.search);
-      const urlToken = urlParams.get("token");
-      if (urlToken) {
-        window.localStorage.setItem("token", urlToken);
-        // Clean up the URL
-        window.history.replaceState({}, document.title, window.location.pathname);
+      if (!API_BASE_URL) {
+        console.error("NEXT_PUBLIC_API_URL is missing. Authentication checks are disabled.");
+        setLoading(false);
+        return;
       }
 
       const token = window.localStorage.getItem("token");
@@ -89,6 +83,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
+    if (!API_BASE_URL) {
+      console.error("NEXT_PUBLIC_API_URL is missing. Login aborted.");
+      throw new Error("Application configuration error: NEXT_PUBLIC_API_URL is missing.");
+    }
+
     const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
       method: "POST",
       headers: {
@@ -113,6 +112,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     fullName: string,
     tenantName: string
   ) => {
+    if (!API_BASE_URL) {
+      console.error("NEXT_PUBLIC_API_URL is missing. Signup aborted.");
+      throw new Error("Application configuration error: NEXT_PUBLIC_API_URL is missing.");
+    }
+
     const tenantSlug = makeTenantSlug(tenantName) || `org-${Date.now()}`;
     const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
       method: "POST",

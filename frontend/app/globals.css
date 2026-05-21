@@ -1179,10 +1179,10 @@ box-shadow: 0 4px 24px rgba(0,0,0,0.07);
   height: 44px;
   border-radius: 12px;
   background: linear-gradient(90deg, #f2f0ee, #f6f3f0, #f2f0ee);
-  animation: shimmer 1.3s infinite;
+  animation: shimmer-bg 1.3s infinite;
 }
 
-@keyframes shimmer {
+@keyframes shimmer-bg {
   0% {
     background-position: -200px 0;
   }
@@ -1485,7 +1485,7 @@ box-shadow: 0 4px 24px rgba(0,0,0,0.07);
 }
 
 /* Skeleton Shimmer Animation */
-@keyframes shimmer {
+@keyframes shimmer-slide {
   0% {
     transform: translateX(-100%);
   }
@@ -1495,5 +1495,5 @@ box-shadow: 0 4px 24px rgba(0,0,0,0.07);
 }
 
 .animate-shimmer {
-  animation: shimmer 2s infinite;
+  animation: shimmer-slide 2s infinite;
 }

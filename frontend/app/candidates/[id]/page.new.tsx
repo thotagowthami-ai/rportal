@@ -303,8 +303,8 @@ export default function CandidateProfilePage() {
                   try {
                     const blob = await api.getBlob(`/api/resumes/${resume.id}/download`);
                     const url = window.URL.createObjectURL(blob);
-                    window.open(url, '_blank');
-                    window.URL.revokeObjectURL(url);
+                    const newTab = window.open(url, "_blank");
+                    setTimeout(() => window.URL.revokeObjectURL(url), 60000);
                   } catch (err) {
                     alert("Failed to view PDF. Please try again.");
                   }
@@ -421,7 +421,7 @@ export default function CandidateProfilePage() {
                 <p className="text-[#515f74]">This candidate hasn't been matched to any jobs yet.</p>
               </div>
             ) : (
-              matches
+              [...matches]
                 .sort((a, b) => b.overall_score - a.overall_score)
                 .map((match, idx) => {
                   const job = jobs[match.job_description_id];

@@ -1,9 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const baseURL =
-  process.env.PLAYWRIGHT_BASE_URL ||
-  process.env.BASE_URL ||
-  "https://recruit-app-v1.vercel.app";
+const baseURL = process.env.PLAYWRIGHT_BASE_URL || process.env.BASE_URL;
+
+if (!baseURL) {
+  throw new Error("Set PLAYWRIGHT_BASE_URL or BASE_URL before running Playwright tests.");
+}
 
 export default defineConfig({
   testDir: "./tests",

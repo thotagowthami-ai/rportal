@@ -56,6 +56,7 @@ export default function AnalyticsPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
+    let active = true;
     const load = async () => {
       setLoading(true);
       setError("");
@@ -63,14 +64,19 @@ export default function AnalyticsPage() {
         const res = await api.get<AnalyticsResponse>("/api/analytics/overview", {
           params: { days },
         });
-        setData(res.data);
+        if (active) setData(res.data);
       } catch (err) {
-        setError(err instanceof Error ? err.message : "Failed to load analytics");
+        if (active) {
+          setError(err instanceof Error ? err.message : "Failed to load analytics");
+        }
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
     load();
+    return () => {
+      active = false;
+    };
   }, [days]);
 
   const funnelRows = useMemo(() => {
@@ -114,8 +120,17 @@ export default function AnalyticsPage() {
       lines.push(["quality_trend", p.label, p.avg_score]);
     });
 
+    const sanitizeCsvCell = (value: string | number) => {
+      const s = String(value);
+      return /^[=+\-@]/.test(s) ? `'${s}` : s;
+    };
+
     const csv = lines
-      .map((row) => row.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+      .map((row) =>
+        row
+          .map((c) => `"${sanitizeCsvCell(c).replace(/"/g, '""')}"`)
+          .join(",")
+      )
       .join("\n");
 
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
