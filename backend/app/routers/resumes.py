@@ -133,12 +133,27 @@ def _normalize_education(raw):
 
 
 def _allowed_tenant_ids(current_user: User) -> list[str]:
-    tenant_ids = [str(current_user.tenant_id)]
-    candidate_portal_tenant_id = (
-        settings.CANDIDATE_PORTAL_TENANT_ID or settings.RECRUITING_TENANT_ID
-    )
-    if candidate_portal_tenant_id:
-        tenant_ids.append(str(candidate_portal_tenant_id))
+    """
+    Returns the list of tenant IDs this user is allowed to query.
+
+    INTENTIONAL DESIGN: Portal-tenant access is granted to all authenticated
+    ATS users because the candidate portal is a shared resource — candidates
+    apply there without knowing which company will review them, and every
+    recruiter needs to see those applications.
+    To disable shared portal access, leave CANDIDATE_PORTAL_TENANT_ID unset.
+    """
+    user_tid = str(current_user.tenant_id)
+    tenant_ids = [user_tid]
+
+    portal_tid = str(
+        settings.CANDIDATE_PORTAL_TENANT_ID or settings.RECRUITING_TENANT_ID or ""
+    ).strip()
+
+    # Append portal tenant only when configured AND distinct from the user's
+    # own tenant (prevents a redundant duplicate entry for portal-tenant users).
+    if portal_tid and portal_tid != user_tid:
+        tenant_ids.append(portal_tid)
+
     return tenant_ids
 
 

@@ -6,10 +6,12 @@ from app.models.tenant import Tenant
 from app.schemas.auth import UserRegister, UserLogin, TokenResponse, UserResponse, ForgotPasswordRequest, PasswordResetConfirm
 from app.services.auth_service import auth_service
 from app.services.email_service import email_service
+from app.services.cache_service import cache_service
 from app.config import settings
 from app.api.deps import get_current_user
 from datetime import datetime
 import logging
+import secrets
 
 import httpx
 from fastapi.responses import RedirectResponse
@@ -198,6 +200,10 @@ async def google_login(source: str = "ats"):
     """
     Start Google OAuth flow:
     Redirects the user to Google's consent screen.
+
+    SECURITY: Generates a cryptographically-random nonce per request,
+    stores it in Redis (5-min TTL), and embeds it in the OAuth state
+    parameter to prevent CSRF attacks.
     """
     if not GOOGLE_CLIENT_ID or not GOOGLE_CLIENT_SECRET:
         logger.error("Google OAuth missing client ID or secret")
@@ -205,6 +211,13 @@ async def google_login(source: str = "ats"):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Google OAuth is not configured",
         )
+
+    # Generate a cryptographically-random nonce and store in Redis (5 min TTL)
+    nonce = secrets.token_urlsafe(32)
+    cache_service.set(key=f"oauth_nonce:{nonce}", value=source, ttl=300)
+
+    # Embed nonce + source in state: "<nonce>:<source>"
+    state = f"{nonce}:{source}"
 
     google_url = (
         f"{GOOGLE_AUTH_URL}"
@@ -214,7 +227,7 @@ async def google_login(source: str = "ats"):
         f"&scope=openid%20email%20profile"
         f"&access_type=offline"
         f"&prompt=consent"
-        f"&state={source}"
+        f"&state={state}"
     )
     return RedirectResponse(google_url)
 
@@ -223,6 +236,7 @@ async def google_login(source: str = "ats"):
 async def google_callback(code: str | None = None, state: str | None = None, db: Session = Depends(get_db)):
     """
     Handle Google OAuth callback:
+    - Verify CSRF nonce from state parameter against Redis
     - Exchange code for tokens
     - Fetch user info
     - Find or create user & tenant
@@ -231,6 +245,23 @@ async def google_callback(code: str | None = None, state: str | None = None, db:
     """
     if not code:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No authorization code provided")
+
+    # ── CSRF nonce verification ──────────────────────────────────────────────
+    if not state or ":" not in state:
+        logger.warning("OAuth callback received invalid or missing state parameter")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth state")
+
+    nonce, source = state.split(":", 1)
+    stored_source = cache_service.get(key=f"oauth_nonce:{nonce}")
+
+    if stored_source is None:
+        logger.warning(f"OAuth CSRF check failed: nonce not found or expired")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OAuth state — please try logging in again")
+
+    # Delete nonce immediately — one-time use only
+    cache_service.delete(key=f"oauth_nonce:{nonce}")
+    logger.info(f"OAuth CSRF nonce verified and consumed for source='{source}'")
+    # ────────────────────────────────────────────────────────────────────────
 
     # Exchange code for access token
     async with httpx.AsyncClient() as client:

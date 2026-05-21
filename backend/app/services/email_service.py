@@ -52,9 +52,22 @@ class EmailService:
         """
 
         if not self.smtp_enabled and not self.sendgrid_enabled:
-            logger.warning("No email provider (SMTP or SendGrid) configured. Password reset email NOT sent.")
-            logger.info(f"RESET LINK (Development/Debug) for {to_email}: {reset_link}")
-            return True # Return true as if successful to not confuse the auth flow in dev
+            logger.warning(
+                "No email provider (SMTP or SendGrid) configured — "
+                "password reset email NOT delivered to %s.",
+                to_email,
+            )
+            # Only emit a debug hint in non-production environments,
+            # and never log the full token — only the last 4 characters.
+            if settings.DEBUG:
+                token_hint = reset_link[-4:] if len(reset_link) >= 4 else "****"
+                logger.debug(
+                    "[DEV] Reset link tail for %s: ...%s  "
+                    "(full link intentionally redacted — configure SMTP to deliver email)",
+                    to_email,
+                    token_hint,
+                )
+            return False  # Signal to callers that delivery failed
 
         if self.smtp_enabled:
             return self._send_via_smtp(to_email, subject, html_content)
