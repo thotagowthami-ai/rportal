@@ -374,9 +374,12 @@ Return ONLY a valid JSON object in this exact format:
         logger.info(f"Generating matches for job {job_id}")
 
         job_id = job_id.strip()
-        job = db.query(JobDescription).filter(JobDescription.id == job_id).first()
+        job = db.query(JobDescription).filter(
+            JobDescription.id == job_id,
+            JobDescription.tenant_id == tenant_id
+        ).first()
         if not job:
-            raise ValueError(f"Job description {job_id} not found")
+            raise ValueError(f"Job description {job_id} not found or access denied for tenant {tenant_id}")
 
         candidate_portal_tenant_id = (
             settings.CANDIDATE_PORTAL_TENANT_ID or settings.RECRUITING_TENANT_ID
