@@ -214,8 +214,6 @@ class MatchingService:
 
         if existing:
             existing.skills = skills_value
-            db.commit()
-            db.refresh(existing)
             return existing
 
         resume = Resume(
@@ -236,8 +234,6 @@ class MatchingService:
         )
 
         db.add(resume)
-        db.commit()
-        db.refresh(resume)
         return resume
 
     async def sync_portal_resumes(self, db: Session, tenant_id: str, uploaded_by: str) -> List[Resume]:
@@ -262,6 +258,14 @@ class MatchingService:
                 db=db,
             )
             resumes.append(resume)
+        
+        try:
+            db.commit()
+            for resume in resumes:
+                db.refresh(resume)
+        except Exception:
+            db.rollback()
+            raise
         return resumes
 
     async def _analyze_with_gemini(
