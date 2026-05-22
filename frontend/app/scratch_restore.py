@@ -1,4 +1,8 @@
-with open('c:/Users/GOWTHAMI/Downloads/projects/recruiting-platform/frontend/app/page.tsx', 'r', encoding='utf-8') as f:
+from pathlib import Path
+
+page_path = Path(__file__).resolve().parent / "page.tsx"
+
+with page_path.open('r', encoding='utf-8') as f:
     content = f.read()
 
 parts = content.split('      {/* SPLIT: ')
@@ -21,6 +25,6 @@ import re
 new_content = new_content.replace(' id="features"', '')
 new_content = re.sub(r'(<section className=\"py-24 px-6 bg-\[#fdf8f3\]\")>', r'\1 id="features">', new_content, count=1)
 
-with open('c:/Users/GOWTHAMI/Downloads/projects/recruiting-platform/frontend/app/page.tsx', 'w', encoding='utf-8') as f:
+with page_path.open('w', encoding='utf-8') as f:
     f.write(new_content)
 print('Done reordering to match the original!')
