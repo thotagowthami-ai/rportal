@@ -25,7 +25,7 @@ export default function LegalLayout({
   const pathname = usePathname();
 
   return (
-    <div className="min-h-screen bg-[#fdf8f3] font-['Plus_Jakarta_Sans',sans-serif] selection:bg-[#3525cd] selection:text-white">
+    <div className="min-h-screen bg-[#fdf8f3] font-sans selection:bg-[#3525cd] selection:text-white">
       {/* Dynamic Header */}
       <nav className="fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-10 bg-[rgba(253,248,243,0.92)] backdrop-blur-2xl border-b border-[rgba(232,223,214,0.6)]">
         <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">

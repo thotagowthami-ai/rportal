@@ -4,7 +4,7 @@ import Link from "next/link";
 
 export default function TrustCenterPage() {
   return (
-    <div className="min-h-screen bg-[#fdf8f3] font-['Plus_Jakarta_Sans',sans-serif]">
+    <div className="min-h-screen bg-[#fdf8f3] font-sans">
       {/* Navigation */}
       <nav className="fixed top-0 left-0 right-0 z-50 h-14 flex items-center justify-between px-10 bg-[rgba(253,248,243,0.92)] backdrop-blur-2xl border-b border-[rgba(232,223,214,0.6)]">
         <div className="flex items-center gap-2">

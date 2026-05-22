@@ -109,7 +109,7 @@ export default function LandingPage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#fdf8f3] font-['Plus_Jakarta_Sans',sans-serif] overflow-x-hidden">
+    <div className="min-h-screen bg-[#fdf8f3] font-sans overflow-x-hidden">
       <style>{`
         .reveal { opacity: 0; transform: translateY(22px); transition: opacity 0.6s ease, transform 0.6s ease; }
         .reveal.v { opacity: 1; transform: none; }

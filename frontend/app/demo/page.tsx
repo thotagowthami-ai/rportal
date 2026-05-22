@@ -14,7 +14,7 @@ export default function DemoPage() {
   const [submitted, setSubmitted] = useState(false);
 
   return (
-    <div className="min-h-screen bg-[#fdf8f3] font-['Plus_Jakarta_Sans',sans-serif] selection:bg-[#3525cd] selection:text-white flex flex-col relative overflow-hidden">
+    <div className="min-h-screen bg-[#fdf8f3] font-sans selection:bg-[#3525cd] selection:text-white flex flex-col relative overflow-hidden">
       {/* Background decoration - subtle gradient to match landing page hero */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[600px] bg-[radial-gradient(ellipse_60%_50%_at_50%_0%,rgba(53,37,205,0.05),transparent_70%)] pointer-events-none" />
       

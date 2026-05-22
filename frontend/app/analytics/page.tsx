@@ -122,7 +122,7 @@ export default function AnalyticsPage() {
 
     const sanitizeCsvCell = (value: string | number) => {
       const s = String(value);
-      return /^[=+\-@]/.test(s) ? `'${s}` : s;
+      return /^\s*[=+\-@]/.test(s) ? s.replace(/^(\s*)([=+\-@])/, "$1'$2") : s;
     };
 
     const csv = lines

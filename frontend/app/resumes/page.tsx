@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import api from "@/lib/api";
 import { ProtectedRoute } from "@/lib/protected-route";
 import { toast } from "sonner";
+import { Modal } from "@/components/ui/Modal";
 
 type Candidate = {
   id: string;
@@ -43,6 +44,8 @@ export default function ResumesPage() {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [loading, setLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [candidateToDelete, setCandidateToDelete] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -145,12 +148,19 @@ export default function ResumesPage() {
 };
   
 
-  const deleteCandidate = async (id: string) => {
+  const deleteCandidate = async () => {
+    if (!candidateToDelete) return;
+    setIsDeleting(true);
     try {
-      await api.delete(`/api/resumes/${id}`);
-      setCandidates((prev) => prev.filter((c) => c.id !== id));
+      await api.delete(`/api/resumes/${candidateToDelete}`);
+      setCandidates((prev) => prev.filter((c) => c.id !== candidateToDelete));
+      toast.success("Candidate deleted");
+      setCandidateToDelete(null);
     } catch (err) {
       console.error("Delete failed", err);
+      toast.error("Failed to delete candidate");
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -399,7 +409,7 @@ export default function ResumesPage() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => deleteCandidate(c.id)}
+                        onClick={() => setCandidateToDelete(c.id)}
                         className="px-3 py-1.5 bg-white border border-red-200 text-red-500 rounded-lg text-xs font-medium hover:bg-red-50 transition-colors"
                       >
                         Delete
@@ -412,6 +422,28 @@ export default function ResumesPage() {
           </div>
         </div>
       </div>
+      <Modal
+        isOpen={!!candidateToDelete}
+        onClose={() => setCandidateToDelete(null)}
+        title="Delete Candidate"
+        primaryAction={{
+          label: "Delete Candidate",
+          onClick: deleteCandidate,
+          variant: "danger",
+          loading: isDeleting,
+        }}
+        secondaryAction={{
+          label: "Cancel",
+          onClick: () => setCandidateToDelete(null),
+        }}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-[#1d1b19] font-medium">Are you sure you want to delete this candidate?</p>
+          <p className="text-sm text-[#515f74]">
+            This action cannot be undone. All resume analysis, matching scores, and associated candidate records will be permanently removed.
+          </p>
+        </div>
+      </Modal>
     </ProtectedRoute>
   );
 }

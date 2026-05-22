@@ -57,7 +57,12 @@ function handleAuthError(response: Response): void {
 async function parseJsonSafe<T>(response: Response): Promise<T | null> {
   if (response.status === 204 || response.status === 205) return null;
   const text = await response.text();
-  return text ? (JSON.parse(text) as T) : null;
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new Error(`Invalid JSON response: ${text.slice(0, 100)}`);
+  }
 }
 
 class ApiClient {

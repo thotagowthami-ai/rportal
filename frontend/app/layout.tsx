@@ -4,7 +4,7 @@ import { Providers } from "./providers";
 
 const jakarta = Plus_Jakarta_Sans({
   subsets: ["latin"],
-  weight: ["300", "400", "500", "600", "700", "800"],
+  variable: "--font-jakarta",
 });
 
 export const metadata = {
@@ -34,7 +34,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
+    <html lang="en" className={jakarta.variable}>
       <body className={jakarta.className}>
         <Providers>{children}</Providers>
       </body>

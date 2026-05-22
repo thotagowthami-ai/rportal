@@ -141,7 +141,6 @@ export default function JobsPage() {
 
   const submitCreateJob = async (targetStatus: "draft" | "active") => {
     const payload: CreateJobPayload = { ...form, status: targetStatus };
-    console.log("Submitting job creation request");
     const validation = validateCreateForm();
     if (validation) {
       setValidationError(validation);

@@ -43,6 +43,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const checkAuth = async () => {
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search);
+        const urlToken = params.get("token");
+        if (urlToken) {
+          window.localStorage.setItem("token", urlToken);
+          // Clean up the URL securely to remove the plain JWT token
+          const newUrl = window.location.pathname;
+          window.history.replaceState({}, document.title, newUrl);
+        }
+      }
+
       if (!API_BASE_URL) {
         console.error("NEXT_PUBLIC_API_URL is missing. Authentication checks are disabled.");
         setLoading(false);

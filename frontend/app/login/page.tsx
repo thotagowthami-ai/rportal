@@ -51,7 +51,6 @@ export default function LoginPage() {
       setErrors({
         form: "Authentication service is not configured.",
       });
-      setGoogleLoading(false);
       return;
     }
 
@@ -133,7 +132,7 @@ export default function LoginPage() {
   const shouldShowPasswordError = (isSubmitAttempted || passwordTouched) && errors.password;
 
   return (
-    <div className="min-h-screen bg-[#fdf8f3] text-[#1f2937] font-['Plus_Jakarta_Sans',sans-serif]">
+    <div className="min-h-screen bg-[#fdf8f3] text-[#1f2937] font-sans">
       <header className="border-b border-[#d8cfbf] bg-[#fdf8f3]/95 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4 lg:px-10">
           <Link href="/" className="flex items-center gap-3 group">
