@@ -286,6 +286,16 @@ export default function JobDetailPage() {
       toast.error(msg);
       return;
     }
+    if (
+      jobForm.salary_min != null &&
+      jobForm.salary_max != null &&
+      jobForm.salary_max < jobForm.salary_min
+    ) {
+      const msg = "Salary max must be greater than salary min.";
+      setValidationError(msg);
+      toast.error(msg);
+      return;
+    }
     setValidationError("");
     if (!jobId) return;
     setSavingJob(true);
