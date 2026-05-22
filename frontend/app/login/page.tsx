@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 type FormErrors = {
@@ -24,6 +25,23 @@ export default function LoginPage() {
   const [errors, setErrors] = useState<FormErrors>({});
   const [isLoading, setIsLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+
+  const searchParams = useSearchParams();
+  useEffect(() => {
+    const oauthError = searchParams.get("error");
+    if (!oauthError) return;
+    const messages: Record<string, string> = {
+      google_session_expired: "Your sign-in session expired. Please try again.",
+      google_no_code: "Google sign-in was cancelled or failed. Please try again.",
+      google_invalid_state: "Invalid sign-in request. Please try again.",
+      google_token_failed: "Could not complete Google sign-in. Please try again.",
+    };
+    setErrors({ form: messages[oauthError] ?? "Google sign-in failed. Please try again." });
+    // Clean the error param from the URL without a re-navigation
+    const url = new URL(window.location.href);
+    url.searchParams.delete("error");
+    window.history.replaceState({}, "", url.toString());
+  }, [searchParams]);
 
   const emailInvalid = useMemo(
     () => email.length > 0 && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email),

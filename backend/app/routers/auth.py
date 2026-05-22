@@ -302,13 +302,16 @@ async def google_callback(code: str | None = None, state: str | None = None, db:
     - Issue JWT
     - Redirect to frontend with token
     """
+    login_url = f"{FRONTEND_URL}/login"
+
     if not code:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No authorization code provided")
+        logger.warning("OAuth callback: missing authorization code")
+        return RedirectResponse(f"{login_url}?error=google_no_code")
 
     # ── CSRF nonce verification ──────────────────────────────────────────────
     if not state or ":" not in state:
         logger.warning("OAuth callback received invalid or missing state parameter")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid OAuth state")
+        return RedirectResponse(f"{login_url}?error=google_invalid_state")
 
     nonce, source = state.split(":", 1)
     stored_source = cache_service.get(key=f"oauth_nonce:{nonce}")
@@ -321,7 +324,7 @@ async def google_callback(code: str | None = None, state: str | None = None, db:
             )
         else:
             logger.warning("OAuth CSRF check failed: nonce not found or expired")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OAuth state — please try logging in again")
+        return RedirectResponse(f"{login_url}?error=google_session_expired")
 
     # Delete nonce immediately — one-time use only
     cache_service.delete(key=f"oauth_nonce:{nonce}")
@@ -346,7 +349,7 @@ async def google_callback(code: str | None = None, state: str | None = None, db:
 
     if not access_token:
         logger.error(f"Google token exchange failed: {token_data}")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Failed to obtain access token from Google")
+        return RedirectResponse(f"{login_url}?error=google_token_failed")
 
     # Fetch user info from Google
     async with httpx.AsyncClient() as client:
