@@ -319,7 +319,6 @@ export default function JobDetailPage() {
     }
     const draft = override || matchDrafts[matchId];
     if (!draft) return false;
-    const previousMatches = matches;
     const previousMatch = matches.find((match) => match.id === matchId);
     setMatches((current) =>
       current.map((match) =>
@@ -345,8 +344,18 @@ export default function JobDetailPage() {
       toast.success("Match updated");
       return true;
     } catch (err) {
-      setMatches(previousMatches);
       if (previousMatch) {
+        setMatches((current) =>
+          current.map((match) =>
+            match.id === matchId
+              ? {
+                  ...match,
+                  recruiter_status: previousMatch.recruiter_status,
+                  recruiter_notes: previousMatch.recruiter_notes,
+                }
+              : match
+          )
+        );
         setMatchDrafts((current) => ({
           ...current,
           [matchId]: {
