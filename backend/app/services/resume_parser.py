@@ -50,10 +50,14 @@ MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 def sanitize_filename(filename: str) -> str:
     if not filename or not isinstance(filename, str):
         return "resume.pdf"
-    # Extract only the base name
+    # Extract only the base name to strip any directory traversal
     base = os.path.basename(filename)
-    # Strip leading/trailing whitespaces and replace illegal characters
+    # Remove ASCII control characters (\x00-\x1F and \x7F)
+    base = re.sub(r'[\x00-\x1f\x7f]', '', base)
+    # Replace illegal filesystem characters
     cleaned = re.sub(r'[<>:"/\\|?*]', '_', base).strip()
+    # Drop any leading dots (hidden file prevention)
+    cleaned = cleaned.lstrip('.')
     return cleaned or "resume.pdf"
 
 

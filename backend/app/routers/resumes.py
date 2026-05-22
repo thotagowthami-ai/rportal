@@ -258,9 +258,9 @@ async def upload_resume(
     try:
         resume_text = extract_resume_text(file_bytes, file.filename, content_type)
         parsed = parse_resume_text(resume_text or "")
-        logger.info(f"Parsed resume fields for {file.filename}: {parsed}")
+        logger.info(f"Resume parsed successfully: {safe_filename}")
     except Exception as e:
-        logger.error(f"Error parsing resume {file.filename}: {e}")
+        logger.error(f"Error parsing resume '{safe_filename}': parse failed")
 
     file_ext = os.path.splitext(safe_filename)[1].lower().lstrip(".")
     resume = Resume(
@@ -343,9 +343,9 @@ async def upload_multiple_resumes(
         try:
             resume_text = extract_resume_text(file_bytes, file.filename, content_type)
             parsed = parse_resume_text(resume_text or "")
-            logger.info(f"Parsed resume fields for {file.filename}: {parsed}")
+            logger.info(f"Resume parsed successfully: {safe_filename}")
         except Exception as e:
-            logger.error(f"Error parsing resume {file.filename}: {e}")
+            logger.error(f"Error parsing resume '{safe_filename}': parse failed")
 
         file_ext = os.path.splitext(safe_filename)[1].lower().lstrip(".")
         resume = Resume(
@@ -584,11 +584,14 @@ def get_download_user(
             raise ValueError()
     except Exception:
         raise HTTPException(status_code=403, detail="Invalid token structure")
-        
+
     set_tenant_context(db, uuid.UUID(tenant_id))
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    # Attach token payload to request state so download_resume can verify resume_id binding
+    if request:
+        request.state.download_token_payload = payload
     return user
 
 
@@ -628,7 +631,8 @@ def generate_download_token(
         "resume_id": str(resume.id)
     }
     # 15-second TTL is extremely secure and robust for browser transitions
-    cache_service.set(key=f"download_token:{download_token}", value=json.dumps(payload), ttl=15)
+    # Pass dict directly — cache_service.set() handles json.dumps internally
+    cache_service.set(key=f"download_token:{download_token}", value=payload, ttl=15)
     return {"download_token": download_token}
 
 
@@ -636,9 +640,18 @@ def generate_download_token(
 @router.get("/{resume_id}/download")
 def download_resume(
     resume_id: str,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_download_user),
 ):
+    # If this request used a one-time download token, verify the token was
+    # issued specifically for this resume to prevent replay across resumes.
+    token_payload = getattr(getattr(request, "state", None), "download_token_payload", None)
+    if token_payload is not None:
+        token_resume_id = token_payload.get("resume_id")
+        if not token_resume_id or token_resume_id != resume_id:
+            raise HTTPException(status_code=403, detail="Download token is not valid for this resume")
+
     resume = (
         db.query(Resume)
         .filter(
