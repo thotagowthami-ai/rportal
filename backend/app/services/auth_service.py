@@ -128,6 +128,9 @@ class AuthService:
                 logger.warning(f"Replay attack detected or token already used: jti={jti}")
                 return None
                 
+            # Mark token as used to prevent replay attacks
+            cache_service.set(f"pwd_reset_jti:{jti}", "used", ttl=60)
+            
             return payload
         return None
 
