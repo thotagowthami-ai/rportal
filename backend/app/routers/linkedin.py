@@ -60,12 +60,19 @@ def _build_frontend_url(path: str) -> str:
 
 
 def _build_state_token(user: User, return_to: str) -> str:
+    import secrets
+    from app.services.cache_service import cache_service
+
+    nonce = secrets.token_urlsafe(32)
+    cache_service.set(key=f"oauth_nonce:{nonce}", value="linkedin", ttl=600)
+
     payload = {
         "sub": str(user.id),
         "tenant_id": str(user.tenant_id),
         "return_to": return_to if return_to.startswith("/") else "/linkedin-generator",
         "exp": datetime.utcnow() + timedelta(minutes=10),
         "kind": "linkedin_oauth_state",
+        "nonce": nonce,
     }
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
@@ -139,6 +146,18 @@ async def linkedin_callback(
         parsed = _decode_state_token(state)
     except JWTError:
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
+    from app.services.cache_service import cache_service
+    nonce = parsed.get("nonce")
+    if not nonce:
+        raise HTTPException(status_code=400, detail="OAuth state missing validation nonce")
+    
+    stored = cache_service.get(key=f"oauth_nonce:{nonce}")
+    if stored != "linkedin":
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+    
+    # Consume immediately
+    cache_service.delete(key=f"oauth_nonce:{nonce}")
 
     user_id = str(parsed.get("sub", ""))
     tenant_id = str(parsed.get("tenant_id", ""))
