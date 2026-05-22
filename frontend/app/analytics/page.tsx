@@ -199,7 +199,7 @@ export default function AnalyticsPage() {
             </div>
           )}
 
-          {loading || !data ? (
+          {loading ? (
             <div className="space-y-4">
               {[1, 2, 3].map((i) => (
                 <div key={i} className="bg-white rounded-2xl p-6 animate-pulse">
@@ -211,6 +211,10 @@ export default function AnalyticsPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          ) : !data ? (
+            <div className="bg-white rounded-2xl p-6 text-sm text-[#515f74]">
+              No analytics data available for the selected period.
             </div>
           ) : (
             <div className="space-y-6">
