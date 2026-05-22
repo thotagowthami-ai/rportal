@@ -18,6 +18,11 @@ RUN pip install --no-cache-dir --upgrade pip \
 # Copy source code (overridden by volume mount in dev)
 COPY . .
 
+# Create and use non-root user
+RUN useradd --create-home --uid 10001 appuser \
+    && chown -R appuser:appuser /app
+USER appuser
+
 # Expose port
 EXPOSE 8000
 

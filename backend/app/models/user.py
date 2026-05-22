@@ -2,6 +2,7 @@ from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from app.database import Base
 from passlib.context import CryptContext
+from passlib.exc import UnknownHashError
 import uuid
 from datetime import datetime
 import enum
@@ -84,12 +85,19 @@ class User(Base):
 
     # ─── Password helpers ───────────────────────────────────
     def verify_password(self, plain_password: str) -> bool:
-        return pwd_context.verify(plain_password, self.hashed_password)
+        if not self.hashed_password:
+            return False
+        if len(plain_password.encode("utf-8")) > 72:
+            return False
+        try:
+            return pwd_context.verify(plain_password, self.hashed_password)
+        except UnknownHashError:
+            return False
 
     @staticmethod
     def hash_password(password: str) -> str:
         if len(password.encode("utf-8")) > 72:
-            password = password[:72]
+            raise ValueError("Password must not exceed 72 bytes")
         return pwd_context.hash(password)
 
     # ─── Authorization helpers ──────────────────────────────

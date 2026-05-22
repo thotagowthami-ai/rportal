@@ -213,35 +213,50 @@ def _extract_experience_years(text: str) -> int:
             found_explicit = max(found_explicit, int(match.group(1)))
     
     # Pattern 2: Calculating from date ranges like "2018 - 2023" or "Jan 2015 - Present"
-    # This is more complex but more accurate for modern resumes.
+    # Collect intervals then merge overlaps to avoid double-counting.
     import datetime
     current_year = datetime.datetime.now().year
-    
+
     # Match years like 2010 - 2015, or 2018 to Present
     date_range_pattern = r"(?:19|20)\d{2}\s*[-–—to]+\s*(?:(?:19|20)\d{2}|present|current|now)"
     ranges = re.findall(date_range_pattern, text, re.IGNORECASE)
-    
-    calculated_years = 0
+
+    intervals: list[tuple[int, int]] = []
     for r in ranges:
-        # Split into start and end
         parts = re.split(r"[-–—to]+", r, flags=re.IGNORECASE)
-        if len(parts) == 2:
-            try:
-                # Extract year digits
-                start_match = re.search(r"((?:19|20)\d{2})", parts[0])
-                if not start_match: continue
-                start_year = int(start_match.group(1))
-                
-                end_year = current_year
-                if not any(kw in parts[1].lower() for kw in ["present", "current", "now"]):
-                    end_match = re.search(r"((?:19|20)\d{2})", parts[1])
-                    if end_match:
-                        end_year = int(end_match.group(1))
-                
-                if end_year >= start_year:
-                    calculated_years += (end_year - start_year)
-            except (ValueError, TypeError):
+        if len(parts) != 2:
+            continue
+        try:
+            start_match = re.search(r"((?:19|20)\d{2})", parts[0])
+            if not start_match:
                 continue
+            start_year = int(start_match.group(1))
+
+            if any(kw in parts[1].lower() for kw in ["present", "current", "now"]):
+                end_year = current_year
+            else:
+                end_match = re.search(r"((?:19|20)\d{2})", parts[1])
+                if not end_match:
+                    continue
+                end_year = int(end_match.group(1))
+
+            if end_year >= start_year:
+                intervals.append((start_year, end_year))
+        except (ValueError, TypeError):
+            continue
+
+    # Merge overlapping / contiguous intervals before summing
+    calculated_years = 0
+    if intervals:
+        intervals.sort()
+        merged_start, merged_end = intervals[0]
+        for s, e in intervals[1:]:
+            if s <= merged_end:          # overlapping or contiguous
+                merged_end = max(merged_end, e)
+            else:
+                calculated_years += merged_end - merged_start
+                merged_start, merged_end = s, e
+        calculated_years += merged_end - merged_start
 
     # Use the larger of found explicit or calculated from ranges
     total_years = max(found_explicit, calculated_years)

@@ -70,6 +70,7 @@ class Settings(BaseSettings):
     LINKEDIN_CLIENT_SECRET: Optional[str] = None
     LINKEDIN_REDIRECT_URI: Optional[str] = None
     LINKEDIN_SCOPES: str = "openid profile email w_member_social"
+    LINKEDIN_ENCRYPTION_KEY: Optional[str] = None  # Dedicated key for LinkedIn token encryption
     FRONTEND_URL: str = ""
 
     # Candidate Portal integration

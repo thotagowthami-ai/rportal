@@ -113,6 +113,12 @@ def register(user_data: UserRegister, db: Session = Depends(get_db)):
             )
         )
 
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
     except Exception as e:
         db.rollback()
         logger.error(f"Registration failed: {str(e)}")
@@ -195,6 +201,59 @@ def get_me(current_user: User = Depends(get_current_user)):
     )
 
 
+from pydantic import BaseModel
+
+class CodeExchangeRequest(BaseModel):
+    code: str
+
+@router.post("/exchange-code", response_model=TokenResponse)
+def exchange_code(payload: CodeExchangeRequest, db: Session = Depends(get_db)):
+    """
+    Exchange a short-lived one-time authorization code for a full TokenResponse.
+    """
+    import json
+    
+    code = payload.code.strip()
+    cache_key = f"oauth_code:{code}"
+    
+    # 1. Fetch token details from Redis
+    payload_str = cache_service.get(key=cache_key)
+    if not payload_str:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired one-time code"
+        )
+        
+    # 2. Delete the cache key immediately to enforce strict one-time use
+    cache_service.delete(key=cache_key)
+    
+    try:
+        data = json.loads(payload_str)
+        return TokenResponse(
+            access_token=data["access_token"],
+            token_type=data["token_type"],
+            expires_in=data["expires_in"],
+            user=UserResponse(
+                id=data["user"]["id"],
+                email=data["user"]["email"],
+                full_name=data["user"]["full_name"],
+                role=data["user"]["role"],
+                is_active=data["user"]["is_active"],
+                is_verified=data["user"]["is_verified"],
+                tenant_id=data["user"]["tenant_id"],
+                created_at=data["user"]["created_at"],
+                last_login=data["user"]["last_login"]
+            )
+        )
+    except Exception as e:
+        logger.error(f"Error parsing cached token payload: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Authentication payload corruption"
+        )
+
+
+
 @router.get("/google")
 async def google_login(source: str = "ats"):
     """
@@ -254,8 +313,14 @@ async def google_callback(code: str | None = None, state: str | None = None, db:
     nonce, source = state.split(":", 1)
     stored_source = cache_service.get(key=f"oauth_nonce:{nonce}")
 
-    if stored_source is None:
-        logger.warning("OAuth CSRF check failed: nonce not found or expired")
+    if stored_source is None or stored_source != source:
+        if stored_source is not None:
+            logger.warning(
+                f"OAuth CSRF check failed: source mismatch "
+                f"(expected='{stored_source}', got='{source}')"
+            )
+        else:
+            logger.warning("OAuth CSRF check failed: nonce not found or expired")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired OAuth state — please try logging in again")
 
     # Delete nonce immediately — one-time use only
@@ -358,10 +423,34 @@ async def google_callback(code: str | None = None, state: str | None = None, db:
         role=(user.role.value if hasattr(user.role, "value") else str(user.role)),
     )
 
+    # Issue short-lived one-time code to avoid token URL exposure
+    import json
+    one_time_code = secrets.token_urlsafe(32)
+    
+    full_name = user.full_name or ""
+    is_active = True if user.is_active is None else bool(user.is_active)
+    
+    payload_data = {
+        "access_token": token,
+        "token_type": "bearer",
+        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        "user": {
+            "id": str(user.id),
+            "email": user.email,
+            "full_name": full_name,
+            "role": (user.role.value if hasattr(user.role, "value") else str(user.role)),
+            "is_active": is_active,
+            "is_verified": user.is_verified,
+            "tenant_id": str(user.tenant_id),
+            "created_at": user.created_at.isoformat() if hasattr(user.created_at, "isoformat") else str(user.created_at),
+            "last_login": user.last_login.isoformat() if (user.last_login and hasattr(user.last_login, "isoformat")) else (str(user.last_login) if user.last_login else None)
+        }
+    }
+    
+    cache_service.set(key=f"oauth_code:{one_time_code}", value=json.dumps(payload_data), ttl=60)
+
     if source == "candidate":
-        import json
         import urllib.parse
-        full_name = user.full_name or ""
         google_user_json = json.dumps({
             "id": str(user.id),
             "email": user.email,
@@ -371,11 +460,11 @@ async def google_callback(code: str | None = None, state: str | None = None, db:
         })
         user_param = urllib.parse.quote(google_user_json)
         candidate_base = (settings.CANDIDATE_PORTAL_URL or "http://localhost:5173").rstrip("/")
-        # Redirect to Candidate Portal URL with both token and user parameters
-        redirect_url = f"{candidate_base}/resume?token={token}&user={user_param}"
+        # Redirect to Candidate Portal URL with both one-time code and user parameters
+        redirect_url = f"{candidate_base}/resume?code={one_time_code}&user={user_param}"
     else:
-        # Redirect to frontend with token as query param
-        redirect_url = f"{FRONTEND_URL}/dashboard?token={token}"
+        # Redirect to frontend with one-time code as query param
+        redirect_url = f"{FRONTEND_URL}/dashboard?code={one_time_code}"
         
     return RedirectResponse(redirect_url)
 
@@ -427,8 +516,17 @@ def reset_password(request: PasswordResetConfirm, db: Session = Depends(get_db))
         )
 
     # Update password
-    user.hashed_password = User.hash_password(request.new_password)
+    try:
+        user.hashed_password = User.hash_password(request.new_password)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     db.commit()
+
+    # Mark the jti as used (remove it) after a successful reset so replay attacks fail
+    jti = payload.get("jti")
+    if jti:
+        from app.services.cache_service import cache_service
+        cache_service.delete(f"pwd_reset_jti:{jti}")
 
     logger.info(f"Password successfully reset for user: {user.email}")
     return {"message": "Password successfully reset. You can now log in with your new password."}

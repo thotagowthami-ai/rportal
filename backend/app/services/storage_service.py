@@ -5,6 +5,7 @@ from typing import Optional
 
 import boto3
 from botocore.config import Config
+from botocore.exceptions import BotoCoreError, ClientError
 
 from app.config import settings
 
@@ -50,7 +51,12 @@ class StorageService:
             region_name=region,
             aws_access_key_id=self.access_key,
             aws_secret_access_key=self.secret_key,
-            config=Config(signature_version="s3v4"),
+            config=Config(
+                signature_version="s3v4",
+                connect_timeout=5,
+                read_timeout=15,
+                retries={"max_attempts": 3, "mode": "standard"},
+            ),
         )
         return self._client
 
@@ -80,8 +86,8 @@ class StorageService:
                 Params={"Bucket": self.bucket, "Key": key},
                 ExpiresIn=3600,
             )
-        except Exception as exc:
-            logger.error(f"R2 upload failed: {exc}")
+        except (ClientError, BotoCoreError) as exc:
+            logger.exception("R2 upload failed")
             return None
 
     def get_url_for_key(self, key: str) -> Optional[str]:
@@ -99,8 +105,8 @@ class StorageService:
                 Params={"Bucket": self.bucket, "Key": cleaned},
                 ExpiresIn=3600,
             )
-        except Exception as exc:
-            logger.error(f"R2 presign failed: {exc}")
+        except (ClientError, BotoCoreError) as exc:
+            logger.exception("R2 presign failed")
             return None
 
     def get_object_stream(self, key: str):
@@ -113,8 +119,8 @@ class StorageService:
             client = self._get_client()
             obj = client.get_object(Bucket=self.bucket, Key=cleaned)
             return obj.get("Body"), obj.get("ContentLength")
-        except Exception as exc:
-            logger.error(f"R2 get_object failed: {exc}")
+        except (ClientError, BotoCoreError) as exc:
+            logger.exception("R2 get_object failed")
             return None
 
 

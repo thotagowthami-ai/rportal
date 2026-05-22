@@ -53,6 +53,9 @@ def send_welcome_email(self, user_email: str, user_name: str):
         # TODO: Implement actual email sending logic inside email_service
         raise NotImplementedError("send_welcome_email task is not yet fully implemented.")
 
+    except NotImplementedError:
+        logger.warning("send_welcome_email task is not implemented; skipping execution")
+        return None
     except Exception as e:
         logger.error("Failed to send welcome email to %s: %s", masked, e)
         raise self.retry(exc=e, countdown=60, max_retries=3)
@@ -82,6 +85,9 @@ def process_user_data(self, user_id: str):
 
     try:
         return asyncio.run(_run())
+    except NotImplementedError:
+        logger.warning("process_user_data task is not implemented for user %s; skipping execution", user_id)
+        return None
     except Exception as e:
         logger.error("Failed to process data for user %s: %s", user_id, e)
         raise self.retry(exc=e, countdown=120, max_retries=3)
@@ -116,6 +122,9 @@ def cleanup_expired_sessions(self):
 
     try:
         return asyncio.run(_run())
+    except NotImplementedError:
+        logger.warning("cleanup_expired_sessions task is not implemented; skipping execution")
+        return None
     except Exception as e:
         logger.exception("Session cleanup failed")
         raise self.retry(exc=e, countdown=300, max_retries=3) from e
@@ -149,6 +158,9 @@ def generate_report(self, tenant_id: str, report_type: str):
 
     try:
         return asyncio.run(_run())
+    except NotImplementedError:
+        logger.warning("generate_report task is not implemented for tenant %s; skipping execution", tenant_id)
+        return None
     except Exception as e:
         logger.error("Failed to generate report for tenant %s: %s", tenant_id, e)
         raise self.retry(exc=e, countdown=300, max_retries=2)
@@ -158,9 +170,4 @@ def generate_report(self, tenant_id: str, report_type: str):
 # Celery Beat Schedule
 # ============================================================================
 
-celery_app.conf.beat_schedule = {
-    "cleanup-expired-sessions-daily": {
-        "task": "app.workers.tasks.cleanup_expired_sessions",
-        "schedule": 86400.0,  # every 24 hours
-    },
-}
+celery_app.conf.beat_schedule = {}

@@ -82,9 +82,8 @@ class EmbeddingService:
 
     def _text_to_vector(self, text: str) -> List[float]:
         seed = int(hashlib.sha256(text.encode()).hexdigest()[:8], 16)
-        np.random.seed(seed)
-
-        vector = np.random.randn(1024)
+        rng = np.random.default_rng(seed)
+        vector = rng.standard_normal(1024)
         vector = vector / np.linalg.norm(vector)
         return vector.tolist()
 
@@ -92,8 +91,10 @@ class EmbeddingService:
         self, texts: List[str], batch_size: int = 10
     ) -> List[Optional[List[float]]]:
         embeddings = []
-        for text in texts:
-            embeddings.append(await self.generate_embedding(text))
+        for i in range(0, len(texts), batch_size):
+            chunk = texts[i : i + batch_size]
+            for text in chunk:
+                embeddings.append(await self.generate_embedding(text))
         return embeddings
 
 

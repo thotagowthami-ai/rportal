@@ -200,15 +200,17 @@ class MatchingService:
         db: Session,
     ) -> Resume:
         skills_value = self._to_storage_list(db, candidate.get("candidateSkills", []))
-        email = candidate.get("email", "")
-        existing = (
-            db.query(Resume)
-            .filter(
-                Resume.candidate_email == email,
-                Resume.tenant_id == tenant_id,
+        email = str(candidate.get("email") or "").strip()
+        existing = None
+        if email:
+            existing = (
+                db.query(Resume)
+                .filter(
+                    Resume.candidate_email == email,
+                    Resume.tenant_id == tenant_id,
+                )
+                .first()
             )
-            .first()
-        )
 
         if existing:
             existing.skills = skills_value
@@ -495,6 +497,7 @@ Return ONLY a valid JSON object in this exact format:
                 try:
                     similar_resumes = self._find_similar_resumes(
                         job_embedding=job_emb,
+                        tenant_id=tenant_id,
                         db=db,
                         limit=limit * 2,
                     )
@@ -614,6 +617,7 @@ Return ONLY a valid JSON object in this exact format:
     def _find_similar_resumes(
         self,
         job_embedding: List[float],
+        tenant_id: str,
         db: Session,
         limit: int = 100,
     ) -> List[Dict[str, Any]]:
@@ -627,11 +631,15 @@ Return ONLY a valid JSON object in this exact format:
                 1 - (embedding <=> CAST(:embedding AS vector)) as similarity
             FROM resumes
             WHERE embedding IS NOT NULL
+              AND tenant_id = :tenant_id
             ORDER BY embedding <=> CAST(:embedding AS vector)
             LIMIT :limit
         """
         )
-        result = db.execute(query, {"embedding": embedding_str, "limit": limit}).fetchall()
+        result = db.execute(
+            query,
+            {"embedding": embedding_str, "tenant_id": tenant_id, "limit": limit},
+        ).fetchall()
         return [{"id": str(row[0]), "similarity": float(row[1])} for row in result]
 
     def _calculate_match_scores(

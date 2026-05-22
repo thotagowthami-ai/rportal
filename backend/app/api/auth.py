@@ -6,6 +6,9 @@ from app.models.tenant import Tenant
 from app.schemas.user import UserCreate, UserResponse, UserLogin, Token
 from app.utils.security import get_password_hash, verify_password, create_access_token
 from app.api.deps import get_current_user
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter()
@@ -39,9 +42,10 @@ def signup(user_in: UserCreate, db: Session = Depends(get_db)):
     try:
         db.commit()
         db.refresh(new_user)
-    except Exception as e:
+    except Exception:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Failed to create account")
+        raise HTTPException(status_code=500, detail="Unable to create account") from None
 
     access_token = create_access_token(
         subject=str(new_user.id),

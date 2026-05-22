@@ -155,10 +155,18 @@ class RateLimitHeadersMiddleware(BaseHTTPMiddleware):
         if request.url.path in ["/health", "/metrics", "/docs", "/redoc", "/openapi.json"]:
             return await call_next(request)
         
-        # Get client IP
+        # If a per-route or per-user rate limiter has already run (via Depends or decorator),
+        # it stores its result in request.state.rate_limit_headers.
+        # Honour that decision and skip the IP precheck to avoid double-counting.
+        pre_checked_headers = getattr(request.state, "rate_limit_headers", None)
+        if pre_checked_headers is not None:
+            response = await call_next(request)
+            for header_name, header_value in pre_checked_headers.items():
+                response.headers[header_name] = header_value
+            return response
+
+        # Fall back to IP-based rate limiting
         client_ip = request.client.host if request.client else "unknown"
-        
-        # Use IP-based rate limiting as default
         rate_limit_key = f"{settings.REDIS_KEY_PREFIX}rate_limit:ip:{client_ip}"
         max_requests = settings.RATE_LIMIT_PER_MINUTE
         window_seconds = 60

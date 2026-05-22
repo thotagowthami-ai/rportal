@@ -43,14 +43,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const checkAuth = async () => {
+      let activeToken = null;
       if (typeof window !== "undefined") {
         const params = new URLSearchParams(window.location.search);
-        const urlToken = params.get("token");
-        if (urlToken) {
-          window.localStorage.setItem("token", urlToken);
-          // Clean up the URL securely to remove the plain JWT token
-          const newUrl = window.location.pathname;
-          window.history.replaceState({}, document.title, newUrl);
+        const urlCode = params.get("code");
+        if (urlCode && API_BASE_URL) {
+          try {
+            const response = await fetch(`${API_BASE_URL}/api/auth/exchange-code`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ code: urlCode }),
+            });
+            if (response.ok) {
+              const data = await response.json();
+              window.localStorage.setItem("token", data.access_token);
+              activeToken = data.access_token;
+              setUser(data.user);
+            }
+          } catch (e) {
+            console.error("Failed to exchange one-time login code:", e);
+          } finally {
+            // Clean up the URL securely to remove the plain exchange code
+            const newUrl = window.location.pathname;
+            window.history.replaceState({}, document.title, newUrl);
+          }
         }
       }
 
@@ -60,7 +78,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
 
-      const token = window.localStorage.getItem("token");
+      const token = activeToken || window.localStorage.getItem("token");
       if (!token) {
         setLoading(false);
         return;

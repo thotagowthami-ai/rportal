@@ -14,8 +14,38 @@ from app.database import Base, get_db
 from app.main import app
 
 
-TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL", "postgresql://postgres:postgres@localhost:5433/recruiting_db")
+TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
+if not TEST_DATABASE_URL:
+    raise RuntimeError("TEST_DATABASE_URL environment variable is required")
 
+
+def _validate_test_db_url(url: str) -> None:
+    from sqlalchemy.engine.url import make_url
+    try:
+        parsed_url = make_url(url)
+    except Exception:
+        raise RuntimeError(
+            f"Unsafe database URL detected: '{url}'. "
+            "TEST_DATABASE_URL must point to an isolated test database containing 'test' keyword."
+        )
+    db_name = parsed_url.database or ""
+    host = parsed_url.host or ""
+    is_sqlite = url.lower().startswith("sqlite")
+    is_test_db = (
+        "test" in db_name.lower() or
+        "test" in host.lower() or
+        "localhost" in host.lower() or
+        "127.0.0.1" in host.lower() or
+        is_sqlite
+    )
+    if not is_test_db:
+        raise RuntimeError(
+            f"Unsafe database URL detected: '{url}'. "
+            "TEST_DATABASE_URL must point to an isolated test database containing 'test' keyword."
+        )
+
+
+_validate_test_db_url(TEST_DATABASE_URL)
 engine = create_engine(TEST_DATABASE_URL)
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -60,12 +90,14 @@ def client(db_session):
             pass
 
     from app.services import matching_service as matching_module
+    original_claude_client = matching_module.matching_service.claude_client
     matching_module.matching_service.claude_client = None
 
     app.dependency_overrides[get_db] = override_get_db
     client = TestClient(app)
     yield client
     app.dependency_overrides.clear()
+    matching_module.matching_service.claude_client = original_claude_client
 
 
 def _register(client: TestClient) -> dict:

@@ -61,7 +61,7 @@ def get_current_user(
         User.tenant_id == str(tenant_id)
     ).first()
 
-    if user is None:
+    if user is None or not user.is_active:
         raise credentials_exception
     return user
 
@@ -104,7 +104,7 @@ def get_current_user_optional(
         User.tenant_id == tenant_id
     ).first()
 
-    if user is None:
+    if user is None or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Could not validate credentials",

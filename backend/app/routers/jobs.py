@@ -58,8 +58,8 @@ async def list_jobs_public(
             required_skills=_to_list(job.required_skills),
             preferred_skills=_to_list(job.preferred_skills),
             location=job.location,
-            salary_min=None,
-            salary_max=None,
+            salary_min=_parse_salary(job.salary_range)[0],
+            salary_max=_parse_salary(job.salary_range)[1],
             experience_required=job.experience_required,
             education_required=job.education_required,
             employment_type=job.employment_type,
@@ -103,8 +103,8 @@ async def get_job_public(
         required_skills=_to_list(job.required_skills),
         preferred_skills=_to_list(job.preferred_skills),
         location=job.location,
-        salary_min=None,
-        salary_max=None,
+        salary_min=_parse_salary(job.salary_range)[0],
+        salary_max=_parse_salary(job.salary_range)[1],
         experience_required=job.experience_required,
         education_required=job.education_required,
         employment_type=job.employment_type,
@@ -133,6 +133,27 @@ def _to_list(value):
         except Exception:
             return []
     return []
+
+
+def _parse_salary(salary_range: Optional[str]) -> tuple[Optional[int], Optional[int]]:
+    if not salary_range:
+        return None, None
+    try:
+        match_range = re.match(r"^\$(\d+)-\$(\d+)$", salary_range)
+        if match_range:
+            return int(match_range.group(1)), int(match_range.group(2))
+        match_plus = re.match(r"^\$(\d+)\+$", salary_range)
+        if match_plus:
+            return int(match_plus.group(1)), None
+        match_range_nodollar = re.match(r"^(\d+)-(\d+)$", salary_range)
+        if match_range_nodollar:
+            return int(match_range_nodollar.group(1)), int(match_range_nodollar.group(2))
+        match_plus_nodollar = re.match(r"^(\d+)\+$", salary_range)
+        if match_plus_nodollar:
+            return int(match_plus_nodollar.group(1)), None
+    except Exception:
+        pass
+    return None, None
 
 
 def _to_storage_list(value, db: Session):
@@ -399,8 +420,8 @@ async def list_jobs(
             required_skills=_to_list(job.required_skills),
             preferred_skills=_to_list(job.preferred_skills),
             location=job.location,
-            salary_min=None,
-            salary_max=None,
+            salary_min=_parse_salary(job.salary_range)[0],
+            salary_max=_parse_salary(job.salary_range)[1],
             experience_required=job.experience_required,
             education_required=job.education_required,
             employment_type=job.employment_type,
@@ -445,8 +466,8 @@ async def get_job(
         required_skills=_to_list(job.required_skills),
         preferred_skills=_to_list(job.preferred_skills),
         location=job.location,
-        salary_min=None,
-        salary_max=None,
+        salary_min=_parse_salary(job.salary_range)[0],
+        salary_max=_parse_salary(job.salary_range)[1],
         experience_required=job.experience_required,
         education_required=job.education_required,
         employment_type=job.employment_type,

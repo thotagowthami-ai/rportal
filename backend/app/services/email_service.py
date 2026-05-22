@@ -18,6 +18,7 @@ class EmailService:
         self.smtp_tls = settings.SMTP_TLS
         self.smtp_ssl = settings.SMTP_SSL
         self.from_email = settings.FROM_EMAIL
+        self.smtp_timeout = 10  # seconds
         
         # Check if SMTP is configured
         self.smtp_enabled = bool(self.smtp_host and self.smtp_user and self.smtp_password)
@@ -86,20 +87,15 @@ class EmailService:
             part = MIMEText(html_content, "html")
             message.attach(part)
 
-            # Connect and send
-            if self.smtp_ssl:
-                server = smtplib.SMTP_SSL(self.smtp_host, self.smtp_port)
-            else:
-                server = smtplib.SMTP(self.smtp_host, self.smtp_port)
-                if self.smtp_tls:
+            # Connect and send — context manager guarantees socket cleanup on any exit
+            smtp_cls = smtplib.SMTP_SSL if self.smtp_ssl else smtplib.SMTP
+            with smtp_cls(self.smtp_host, self.smtp_port, timeout=self.smtp_timeout) as server:
+                if not self.smtp_ssl and self.smtp_tls:
                     server.starttls()
+                if self.smtp_user and self.smtp_password:
+                    server.login(self.smtp_user, self.smtp_password)
+                server.sendmail(self.from_email, to_email, message.as_string())
 
-            if self.smtp_user and self.smtp_password:
-                server.login(self.smtp_user, self.smtp_password)
-            
-            server.sendmail(self.from_email, to_email, message.as_string())
-            server.quit()
-            
             logger.info(f"Password reset email sent via SMTP to {to_email}")
             return True
         except Exception as e:

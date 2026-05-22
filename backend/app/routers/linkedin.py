@@ -143,7 +143,7 @@ async def linkedin_callback(
     user_id = str(parsed.get("sub", ""))
     tenant_id = str(parsed.get("tenant_id", ""))
     return_to = str(parsed.get("return_to", "/linkedin-generator"))
-    if not user_id or not tenant_id:
+    if parsed.get("kind") != "linkedin_oauth_state" or not user_id or not tenant_id:
         raise HTTPException(status_code=400, detail="Invalid OAuth state payload")
 
     user = db.query(User).filter(User.id == user_id, User.tenant_id == tenant_id).first()

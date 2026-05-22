@@ -2,8 +2,8 @@
 import sys
 from pathlib import Path
 
-# Add backend to path
-backend_path = Path("c:/Users/GOWTHAMI/Downloads/projects/recruiting-platform/backend")
+# Add backend to path (portable)
+backend_path = Path(__file__).resolve().parents[2]
 sys.path.append(str(backend_path))
 
 try:

@@ -261,6 +261,7 @@ async def upload_resume(
     except Exception as e:
         logger.error(f"Error parsing resume {file.filename}: {e}")
 
+    file_ext = os.path.splitext(file.filename)[1].lower().lstrip(".")
     resume = Resume(
         tenant_id=str(current_user.tenant_id),
         uploaded_by=str(current_user.id),
@@ -344,6 +345,7 @@ async def upload_multiple_resumes(
         except Exception as e:
             logger.error(f"Error parsing resume {file.filename}: {e}")
 
+        file_ext = os.path.splitext(file.filename)[1].lower().lstrip(".")
         resume = Resume(
             tenant_id=str(current_user.tenant_id),
             uploaded_by=str(current_user.id),
@@ -438,6 +440,7 @@ async def public_apply_job(
 
     # 4. Create Resume Record
     job_creator = getattr(job, "created_by", None) or getattr(job, "created_by_id", None)
+    file_ext = os.path.splitext(file.filename)[1].lower().lstrip(".")
     resume = Resume(
         tenant_id=str(job.tenant_id),
         uploaded_by=str(job_creator) if job_creator else None,
@@ -537,26 +540,101 @@ def re_analyze_resume(
     return _serialize_resume(resume)
 
 
-# ✅ Helper to inject Token from URL Query into Headers
-def inject_query_token_to_header(request: Request):
-    """
-    Hack to allow passing ?token=... for window.open() direct views.
-    Injects it into the request scope so get_current_user still works.
-    """
-    token = request.query_params.get("token")
-    if token:
-        # Check if authorization is already present
-        has_auth = any(k.lower() == b"authorization" for k, v in request.scope.get("headers", []))
-        if not has_auth:
-            request.scope["headers"].append((b"authorization", f"Bearer {token}".encode()))
+# ✅ New validation dependency for short-lived one-time download tokens
+def get_download_user(
+    token: str | None = Query(None),
+    db: Session = Depends(get_db),
+    request: Request = None,
+) -> User:
+    from app.services.cache_service import cache_service
+    import json
+    
+    # 1. Check if standard Authorization header is present
+    auth_header = request.headers.get("Authorization") if request else None
+    if auth_header and auth_header.startswith("Bearer "):
+        from app.api.deps import get_current_user
+        token_str = auth_header.split(" ", 1)[1]
+        return get_current_user(token=token_str, db=db)
+        
+    # 2. Check for short-lived one-time download token in query parameter
+    if not token:
+        raise HTTPException(
+            status_code=401,
+            detail="Authentication credentials are required."
+        )
+        
+    payload_str = cache_service.get(key=f"download_token:{token}")
+    if not payload_str:
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid or expired download token"
+        )
+        
+    # Enforce strict one-time use immediately
+    cache_service.delete(key=f"download_token:{token}")
+    
+    try:
+        payload = json.loads(payload_str)
+        user_id = payload.get("user_id")
+        tenant_id = payload.get("tenant_id")
+        if not user_id or not tenant_id:
+            raise ValueError()
+    except Exception:
+        raise HTTPException(status_code=403, detail="Invalid token structure")
+        
+    set_tenant_context(db, uuid.UUID(tenant_id))
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    return user
 
 
-# ✅ 7. Download
-@router.get("/{resume_id}/download", dependencies=[Depends(inject_query_token_to_header)])
-def download_resume(
+# ✅ New POST endpoint to request a short-lived one-time download token
+@router.post("/{resume_id}/download-token")
+def generate_download_token(
     resume_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+):
+    resume_id = (resume_id or "").strip()
+    try:
+        resume_uuid = str(uuid.UUID(resume_id))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid resume_id")
+        
+    resume = (
+        db.query(Resume)
+        .filter(
+            Resume.id == resume_uuid,
+            Resume.tenant_id.in_(_allowed_tenant_ids(current_user)),
+            Resume.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+        
+    import secrets
+    import json
+    from app.services.cache_service import cache_service
+    
+    download_token = secrets.token_urlsafe(32)
+    payload = {
+        "user_id": str(current_user.id),
+        "tenant_id": str(current_user.tenant_id),
+        "resume_id": str(resume.id)
+    }
+    # 15-second TTL is extremely secure and robust for browser transitions
+    cache_service.set(key=f"download_token:{download_token}", value=json.dumps(payload), ttl=15)
+    return {"download_token": download_token}
+
+
+# ✅ 7. Download
+@router.get("/{resume_id}/download")
+def download_resume(
+    resume_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_download_user),
 ):
     resume = (
         db.query(Resume)

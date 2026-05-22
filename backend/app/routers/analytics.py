@@ -1,6 +1,9 @@
 from datetime import datetime, timedelta
+import json
+import logging
 
 from fastapi import APIRouter, Depends, Query
+from redis.exceptions import RedisError
 from sqlalchemy import String, case, cast, func
 from sqlalchemy.orm import Session
 
@@ -10,9 +13,10 @@ from app.models.job_description import JobDescription
 from app.models.match import Match
 from app.models.resume import Resume
 from app.models.user import User
-import json
 from app.core.redis_client import redis_client
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -195,9 +199,13 @@ def get_analytics_overview(
     period_start = now - timedelta(days=days)
     prev_start = period_start - timedelta(days=days)
     cache_key = f"{settings.REDIS_KEY_PREFIX}analytics:overview:{tenant_id}:{days}"
-    cached_data = redis_client.get(cache_key)
-    if cached_data:
-        return json.loads(cached_data)
+    if redis_client:
+        try:
+            cached_data = redis_client.get(cache_key)
+            if cached_data:
+                return json.loads(cached_data)
+        except (RedisError, json.JSONDecodeError, TypeError, ValueError) as exc:
+            logger.warning("Analytics cache read failed for key=%s: %s", cache_key, exc)
 
     jobs_query = db.query(JobDescription).filter(
         JobDescription.tenant_id == tenant_id,
@@ -346,7 +354,11 @@ def get_analytics_overview(
         },
     }
 
-    redis_client.set(cache_key, json.dumps(response_data), ex=3600)
+    if redis_client:
+        try:
+            redis_client.set(cache_key, json.dumps(response_data), ex=3600)
+        except RedisError as exc:
+            logger.warning("Analytics cache write failed for key=%s: %s", cache_key, exc)
     return response_data
 
 
@@ -358,6 +370,8 @@ def invalidate_analytics_cache(tenant_id: str) -> None:
     {settings.REDIS_KEY_PREFIX}analytics:overview:{tenant_id}:*
     """
     pattern = f"{settings.REDIS_KEY_PREFIX}analytics:overview:{tenant_id}:*"
+    if not redis_client:
+        return
     try:
         # Non-blocking SCAN to find and delete keys matching the pattern securely
         cursor = 0
@@ -368,8 +382,7 @@ def invalidate_analytics_cache(tenant_id: str) -> None:
             if cursor == 0:
                 break
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning(
-            f"Failed to invalidate analytics cache for tenant {tenant_id}: {e}"
+        logger.warning(
+            "Failed to invalidate analytics cache for tenant %s: %s", tenant_id, e
         )
 

@@ -86,15 +86,24 @@ class AuthService:
         Create a short-lived JWT for password reset.
         Valid for PASSWORD_RESET_EXPIRE_MINUTES (default 60).
         """
+        import uuid
+        from app.services.cache_service import cache_service
+
         reset_ttl = getattr(settings, "PASSWORD_RESET_EXPIRE_MINUTES", 60)
         expire = datetime.utcnow() + timedelta(minutes=reset_ttl)
+        jti = str(uuid.uuid4())
         payload = {
             "sub": user_id,
             "email": email,
             "type": "password_reset",
+            "jti": jti,
             "exp": expire,
             "iat": datetime.utcnow()
         }
+        
+        # Persist the jti in Redis (TTL is in seconds)
+        cache_service.set(f"pwd_reset_jti:{jti}", "unused", ttl=reset_ttl * 60)
+        
         token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
         return token
 
@@ -104,8 +113,21 @@ class AuthService:
         Verify a password reset token.
         Returns the payload if valid and of type password_reset.
         """
+        from app.services.cache_service import cache_service
+
         payload = AuthService.decode_token(token)
         if payload and payload.get("type") == "password_reset":
+            jti = payload.get("jti")
+            if not jti:
+                logger.warning("Password reset token missing 'jti'")
+                return None
+            
+            # Check if the jti exists and is unused
+            status = cache_service.get(f"pwd_reset_jti:{jti}")
+            if status != "unused":
+                logger.warning(f"Replay attack detected or token already used: jti={jti}")
+                return None
+                
             return payload
         return None
 

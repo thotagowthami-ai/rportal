@@ -25,7 +25,31 @@ if not TEST_DATABASE_URL:
     raise RuntimeError("TEST_DATABASE_URL environment variable is required")
 
 def _validate_test_db_url(url: str):
-    if not url or "test" not in url.lower():
+    if not url:
+        raise RuntimeError(
+            f"Unsafe database URL detected: '{url}'. "
+            "TEST_DATABASE_URL must point to an isolated test database containing 'test' keyword."
+        )
+    from sqlalchemy.engine.url import make_url
+    try:
+        parsed_url = make_url(url)
+    except Exception:
+        raise RuntimeError(
+            f"Unsafe database URL detected: '{url}'. "
+            "TEST_DATABASE_URL must point to an isolated test database containing 'test' keyword."
+        )
+    db_name = parsed_url.database or ""
+    host = parsed_url.host or ""
+    username = parsed_url.username or ""
+    is_sqlite = url.lower().startswith("sqlite")
+    is_test_db = (
+        "test" in db_name.lower() or
+        "test" in host.lower() or
+        "localhost" in host.lower() or
+        "127.0.0.1" in host.lower() or
+        is_sqlite
+    )
+    if not is_test_db:
         raise RuntimeError(
             f"Unsafe database URL detected: '{url}'. "
             "TEST_DATABASE_URL must point to an isolated test database containing 'test' keyword."

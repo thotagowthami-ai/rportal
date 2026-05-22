@@ -441,7 +441,7 @@ def _enforce_high_score(post: str, input_text: str, tone: str) -> tuple[str, int
         return post, rating, feedback
     improved = _build_template_post(input_text, tone)
     rescored_rating, rescored_feedback = _score_post(improved)
-    return improved, max(rescored_rating, 90), rescored_feedback
+    return improved, rescored_rating, rescored_feedback
 
 
 def _build_local_post(user_input: str, tone: str) -> GeneratePostResponse:
@@ -451,7 +451,7 @@ def _build_local_post(user_input: str, tone: str) -> GeneratePostResponse:
     rescored_rating, rescored_feedback = _score_post(sanitized_post)
     return GeneratePostResponse(
         post=_apply_symbols(sanitized_post),
-        rating=max(91, rating, rescored_rating),
+        rating=rescored_rating,
         feedback=rescored_feedback if rescored_feedback else feedback,
         source="local",
     )
@@ -561,7 +561,7 @@ def _to_result_from_json(parsed: dict[str, Any], source: str) -> GeneratePostRes
         feedback = rescored_feedback
     return GeneratePostResponse(
         post=_apply_symbols(sanitized_post),
-        rating=max(91, rating, rescored_rating),
+        rating=rescored_rating,
         feedback=feedback,
         source=source,
     )
@@ -704,7 +704,7 @@ async def _generate_with_deepseek(user_input: str, tone: str) -> GeneratePostRes
 
     return GeneratePostResponse(
         post=_apply_symbols(sanitized_post),
-        rating=max(91, rating),
+        rating=rating,
         feedback=feedback,
         source="deepseek",
     )
@@ -735,9 +735,8 @@ async def generate_linkedin_post(
         sanitized_improved = _sanitize_generated_post(improved_post)
         rescored_rating, rescored_feedback = _score_post(sanitized_improved)
         result.post = _apply_symbols(sanitized_improved)
-        result.rating = max(91, int(result.rating), int(improved_rating), int(rescored_rating))
+        result.rating = rescored_rating
         result.feedback = rescored_feedback if rescored_feedback else improved_feedback
         return result
     fallback = _build_local_post(user_input, tone)
-    fallback.rating = max(91, int(fallback.rating))
     return fallback
