@@ -32,6 +32,13 @@ type DashboardData = {
   latest_activity?: LatestActivity[];
 };
 
+function safeInternalHref(raw: string | undefined | null): string {
+  if (!raw || !raw.startsWith("/") || raw.startsWith("//")) {
+    return "/dashboard";
+  }
+  return raw;
+}
+
 export default function DashboardPage() {
   const { user, logout } = useAuth();
   const role = normalizeRole(user?.role);
@@ -252,7 +259,7 @@ export default function DashboardPage() {
                       className="px-6 py-3 hover:bg-[#fef8f3] transition-colors flex items-start justify-between gap-3"
                     >
                       <Link
-                        href={activity.link}
+                        href={safeInternalHref(activity.link)}
                         className="flex-1 text-sm text-[#1d1b19] hover:text-[#3525cd] transition-colors leading-snug"
                       >
                         {activity.message}
