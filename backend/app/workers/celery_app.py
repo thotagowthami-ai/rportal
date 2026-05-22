@@ -51,7 +51,7 @@ celery_app.conf.update(
     task_track_started=True,
     
     # Results
-    result_expires=None,  # Never expire results
+    result_expires=86400,  # 24h retention to prevent unbounded Redis growth
     result_key_prefix="recruit:celery-result:",
     result_backend_transport_options={
         "master_name": "mymaster",
