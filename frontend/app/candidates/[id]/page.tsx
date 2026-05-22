@@ -78,6 +78,10 @@ export default function CandidateProfilePage() {
   useEffect(() => {
     if (!candidateId) return;
     (async () => {
+      setError("");
+      setResume(null);
+      setMatches([]);
+      setJobs({});
       setLoading(true);
       try {
         const resumeRes = await api.get<Resume>(`/api/resumes/${candidateId}`);
