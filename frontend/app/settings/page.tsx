@@ -401,7 +401,9 @@ export default function SettingsPage() {
       </div>
       <Modal
         isOpen={!!integrationModal}
-        onClose={() => setIntegrationModal(null)}
+        onClose={() => {
+          if (!isConnecting) setIntegrationModal(null);
+        }}
         title={
           integrationModal === "slack" ? "Connect to Slack" :
           integrationModal === "linkedin" ? "LinkedIn Sync Setup" :
@@ -410,12 +412,14 @@ export default function SettingsPage() {
         primaryAction={{
           label: isConnecting ? "Connecting..." : "Connect",
           onClick: async () => {
+            const target = integrationModal;
+            if (!target) return;
             setIsConnecting(true);
             // Simulate OAuth/Setup
             await new Promise(r => setTimeout(r, 1500));
-            if (integrationModal === "slack") setSlackIntegration(true);
-            if (integrationModal === "linkedin") setLinkedInSync(true);
-            if (integrationModal === "ats") setAtsIntegration(true);
+            if (target === "slack") setSlackIntegration(true);
+            if (target === "linkedin") setLinkedInSync(true);
+            if (target === "ats") setAtsIntegration(true);
             setIsConnecting(false);
             setIntegrationModal(null);
             toast.success("Integration connected successfully!");
@@ -424,7 +428,9 @@ export default function SettingsPage() {
         }}
         secondaryAction={{
           label: "Cancel",
-          onClick: () => setIntegrationModal(null)
+          onClick: () => {
+            if (!isConnecting) setIntegrationModal(null);
+          }
         }}
       >
         <div className="space-y-4">
