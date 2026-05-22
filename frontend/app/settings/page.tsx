@@ -366,6 +366,7 @@ export default function SettingsPage() {
                   </div>
                   <button
                     type="button"
+                    aria-label={item.label}
                     onClick={() => {
                       if (item.value) {
                         item.set(false);
