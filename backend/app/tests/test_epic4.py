@@ -31,12 +31,12 @@ def _validate_test_db_url(url: str) -> None:
     db_name = parsed_url.database or ""
     host = parsed_url.host or ""
     is_sqlite = url.lower().startswith("sqlite")
+    
+    allow_destructive = os.environ.get("TEST_ALLOW_DESTRUCTIVE", "").lower() == "true"
     is_test_db = (
         "test" in db_name.lower() or
-        "test" in host.lower() or
-        "localhost" in host.lower() or
-        "127.0.0.1" in host.lower() or
-        is_sqlite
+        is_sqlite or
+        allow_destructive
     )
     if not is_test_db:
         raise RuntimeError(
@@ -78,6 +78,7 @@ def db_session():
         yield db
     finally:
         db.close()
+        _validate_test_db_url(TEST_DATABASE_URL)
         Base.metadata.drop_all(bind=engine)
 
 
