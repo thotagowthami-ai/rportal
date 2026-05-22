@@ -47,11 +47,23 @@ ALLOWED_EXTENSIONS = {"pdf", "docx", "doc"}
 MAX_UPLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 
 
+def sanitize_filename(filename: str) -> str:
+    if not filename or not isinstance(filename, str):
+        return "resume.pdf"
+    # Extract only the base name
+    base = os.path.basename(filename)
+    # Strip leading/trailing whitespaces and replace illegal characters
+    cleaned = re.sub(r'[<>:"/\\|?*]', '_', base).strip()
+    return cleaned or "resume.pdf"
+
+
 def validate_file(
     filename: str,
     file_size: Optional[int] = None,
     file_bytes: Optional[bytes] = None,
 ) -> tuple[bool, str]:
+    if not filename or not isinstance(filename, str):
+        return False, "Invalid file name"
     filename_lower = filename.lower()
     file_ext = filename_lower.rsplit(".", 1)[-1] if "." in filename_lower else ""
     if file_ext not in ALLOWED_EXTENSIONS:

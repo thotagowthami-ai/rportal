@@ -6,7 +6,7 @@ from app.database import get_db, set_tenant_context
 from app.api.deps import get_current_user
 from app.models.resume import Resume
 from app.models.user import User
-from app.services.resume_parser import extract_resume_text, parse_resume_text, is_doc_conversion_available, validate_file
+from app.services.resume_parser import extract_resume_text, parse_resume_text, is_doc_conversion_available, validate_file, sanitize_filename
 import uuid
 import os
 import json
@@ -239,18 +239,19 @@ async def upload_resume(
     if not is_valid_bytes:
         raise HTTPException(status_code=400, detail=err_bytes_msg)
 
+    safe_filename = sanitize_filename(file.filename)
     content_type = file.content_type or ""
     file_path = storage_service.upload_bytes(
-        file_bytes, file.filename, content_type=content_type, prefix="resumes"
+        file_bytes, safe_filename, content_type=content_type, prefix="resumes"
     )
     if not file_path:
         os.makedirs(UPLOADS_DIR, exist_ok=True)
         file_id = str(uuid.uuid4())
-        file_path = os.path.join(UPLOADS_DIR, f"{file_id}_{file.filename}")
+        file_path = os.path.join(UPLOADS_DIR, f"{file_id}_{safe_filename}")
         with open(file_path, "wb") as buffer:
             buffer.write(file_bytes)
 
-    resolved_name = (candidate_name or "").strip() or file.filename
+    resolved_name = (candidate_name or "").strip() or safe_filename
     parsed = {"candidate_email": "", "candidate_phone": "", "skills": [], "experience_years": 0, "education": "", "current_role": ""}
     resume_text = None
 
@@ -261,7 +262,7 @@ async def upload_resume(
     except Exception as e:
         logger.error(f"Error parsing resume {file.filename}: {e}")
 
-    file_ext = os.path.splitext(file.filename)[1].lower().lstrip(".")
+    file_ext = os.path.splitext(safe_filename)[1].lower().lstrip(".")
     resume = Resume(
         tenant_id=str(current_user.tenant_id),
         uploaded_by=str(current_user.id),
@@ -269,7 +270,7 @@ async def upload_resume(
         candidate_email=(candidate_email or parsed.get("candidate_email") or None),
         candidate_phone=(candidate_phone or parsed.get("candidate_phone") or None),
         file_path=file_path,
-        file_name=file.filename,
+        file_name=safe_filename,
         file_type=file_ext,
         resume_text=resume_text,
         skills=_to_storage_skills(db, parsed.get("skills", [])),
@@ -323,18 +324,19 @@ async def upload_multiple_resumes(
         if not is_valid_bytes:
             continue
 
+        safe_filename = sanitize_filename(file.filename)
         content_type = file.content_type or ""
         file_path = storage_service.upload_bytes(
-            file_bytes, file.filename, content_type=content_type, prefix="resumes"
+            file_bytes, safe_filename, content_type=content_type, prefix="resumes"
         )
         if not file_path:
             os.makedirs(UPLOADS_DIR, exist_ok=True)
             file_id = str(uuid.uuid4())
-            file_path = os.path.join(UPLOADS_DIR, f"{file_id}_{file.filename}")
+            file_path = os.path.join(UPLOADS_DIR, f"{file_id}_{safe_filename}")
             with open(file_path, "wb") as buffer:
                 buffer.write(file_bytes)
         
-        resolved_name = (candidate_name or "").strip() or file.filename
+        resolved_name = (candidate_name or "").strip() or safe_filename
         parsed = {"candidate_email": "", "candidate_phone": "", "skills": [], "experience_years": 0, "education": "", "current_role": ""}
         resume_text = None
 
@@ -345,7 +347,7 @@ async def upload_multiple_resumes(
         except Exception as e:
             logger.error(f"Error parsing resume {file.filename}: {e}")
 
-        file_ext = os.path.splitext(file.filename)[1].lower().lstrip(".")
+        file_ext = os.path.splitext(safe_filename)[1].lower().lstrip(".")
         resume = Resume(
             tenant_id=str(current_user.tenant_id),
             uploaded_by=str(current_user.id),
@@ -353,7 +355,7 @@ async def upload_multiple_resumes(
             candidate_email=(candidate_email or parsed.get("candidate_email") or None),
             candidate_phone=(candidate_phone or parsed.get("candidate_phone") or None),
             file_path=file_path,
-            file_name=file.filename,
+            file_name=safe_filename,
             file_type=file_ext,
             resume_text=resume_text,
             skills=_to_storage_skills(db, parsed.get("skills", [])),
@@ -419,13 +421,14 @@ async def public_apply_job(
     is_valid_bytes, err_bytes_msg = validate_file(file.filename, file_bytes=file_bytes)
     if not is_valid_bytes:
         raise HTTPException(status_code=400, detail=err_bytes_msg)
+    safe_filename = sanitize_filename(file.filename)
     file_path = storage_service.upload_bytes(
-        file_bytes, file.filename, content_type=file.content_type or "", prefix="resumes"
+        file_bytes, safe_filename, content_type=file.content_type or "", prefix="resumes"
     )
     if not file_path:
         os.makedirs(UPLOADS_DIR, exist_ok=True)
         file_id = str(uuid.uuid4())
-        file_path = os.path.join(UPLOADS_DIR, f"{file_id}_{file.filename}")
+        file_path = os.path.join(UPLOADS_DIR, f"{file_id}_{safe_filename}")
         with open(file_path, "wb") as buffer:
             buffer.write(file_bytes)
 
@@ -440,7 +443,7 @@ async def public_apply_job(
 
     # 4. Create Resume Record
     job_creator = getattr(job, "created_by", None) or getattr(job, "created_by_id", None)
-    file_ext = os.path.splitext(file.filename)[1].lower().lstrip(".")
+    file_ext = os.path.splitext(safe_filename)[1].lower().lstrip(".")
     resume = Resume(
         tenant_id=str(job.tenant_id),
         uploaded_by=str(job_creator) if job_creator else None,
@@ -448,7 +451,7 @@ async def public_apply_job(
         candidate_email=candidate_email,
         candidate_phone=candidate_phone or parsed.get("candidate_phone") or None,
         file_path=file_path,
-        file_name=file.filename,
+        file_name=safe_filename,
         file_type=file_ext,
         resume_text=resume_text,
         skills=_to_storage_skills(db, parsed.get("skills", [])),
