@@ -155,12 +155,12 @@ class RateLimitHeadersMiddleware(BaseHTTPMiddleware):
         if request.url.path in ["/health", "/metrics", "/docs", "/redoc", "/openapi.json"]:
             return await call_next(request)
         
-        # If a per-route or per-user rate limiter has already run (via Depends or decorator),
-        # it stores its result in request.state.rate_limit_headers.
-        # Honour that decision and skip the IP precheck to avoid double-counting.
+        # Defer guard: first await the route execution so dependencies/decorators run
+        response = await call_next(request)
+        
+        # If request.state.rate_limit_headers is set, attach those and skip IP precheck
         pre_checked_headers = getattr(request.state, "rate_limit_headers", None)
         if pre_checked_headers is not None:
-            response = await call_next(request)
             for header_name, header_value in pre_checked_headers.items():
                 response.headers[header_name] = header_value
             return response
@@ -184,9 +184,6 @@ class RateLimitHeadersMiddleware(BaseHTTPMiddleware):
                 content={"detail": "Rate limit exceeded. Please try again later."},
                 headers=headers
             )
-        
-        # Process request
-        response = await call_next(request)
         
         # Add rate limit headers to response
         for header_name, header_value in headers.items():
@@ -299,24 +296,29 @@ def rate_limit(max_requests: int = 60, window_seconds: int = 60):
                         request = arg
                         break
             
-            if request:
-                client_ip = request.client.host if request.client else "unknown"
-                rate_limit_key = f"{settings.REDIS_KEY_PREFIX}rate_limit:endpoint:{func.__name__}:{client_ip}"
-                
-                is_allowed, headers = await rate_limiter.check_rate_limit(
-                    rate_limit_key,
-                    max_requests,
-                    window_seconds
+            if not request:
+                raise RuntimeError(
+                    f"Rate limiting decorator applied on '{func.__name__}' requires "
+                    "a 'request: fastapi.Request' parameter in the endpoint signature."
                 )
-                
-                request.state.rate_limit_headers = headers
-                
-                if not is_allowed:
-                    raise HTTPException(
-                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                        detail=f"Rate limit exceeded for {func.__name__}",
-                        headers=headers
-                    )
+            
+            client_ip = request.client.host if request.client else "unknown"
+            rate_limit_key = f"{settings.REDIS_KEY_PREFIX}rate_limit:endpoint:{func.__name__}:{client_ip}"
+            
+            is_allowed, headers = await rate_limiter.check_rate_limit(
+                rate_limit_key,
+                max_requests,
+                window_seconds
+            )
+            
+            request.state.rate_limit_headers = headers
+            
+            if not is_allowed:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=f"Rate limit exceeded for {func.__name__}",
+                    headers=headers
+                )
             
             return await func(*args, **kwargs)
         return wrapper
