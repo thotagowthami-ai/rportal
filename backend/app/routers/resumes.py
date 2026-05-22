@@ -707,6 +707,13 @@ def download_resume(
                     local_path = os.path.join(UPLOADS_DIR, f)
                     break
 
+    if local_path:
+        real_local = os.path.realpath(local_path)
+        real_uploads = os.path.realpath(UPLOADS_DIR)
+        prefix = real_uploads if real_uploads.endswith(os.sep) else real_uploads + os.sep
+        if not real_local.startswith(prefix):
+            raise HTTPException(status_code=400, detail="Invalid path or path traversal detected")
+
     if local_path and os.path.exists(local_path):
         if not os.access(local_path, os.R_OK):
             raise HTTPException(status_code=500, detail="File is not readable")
