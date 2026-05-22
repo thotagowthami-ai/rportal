@@ -1,0 +1,22 @@
+# ── Frontend Dev Dockerfile ─────────────────────────────────────────────────
+FROM node:20-alpine
+
+WORKDIR /app
+
+RUN mkdir -p /app/.next /app/node_modules && chown -R node:node /app
+
+# Drop root privileges
+USER node
+
+# Install dependencies first (layer caching)
+COPY --chown=node:node package.json package-lock.json* ./
+RUN npm ci
+
+# Copy source (overridden by volume mount in dev)
+COPY --chown=node:node . .
+
+# Expose Next.js dev port
+EXPOSE 3000
+
+# Run dev server with hot-reload
+CMD ["npm", "run", "dev"]
