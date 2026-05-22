@@ -77,7 +77,7 @@ def get_current_user_optional(
     - If token is invalid: raise 401
     """
     if token is None:
-        set_tenant_context(db, None)
+        db.info.pop("tenant_id", None)
         return None
 
     try:
