@@ -16,7 +16,7 @@ export default function PrivacyPolicy() {
           </p>
           <ul>
             <li>Name and contact data</li>
-            <li>Credentials (passwords and security info)</li>
+            <li>Authentication credentials (hashed/salted credentials and related security info)</li>
             <li>Payment data</li>
             <li>Candidate resume and extracted profile data</li>
           </ul>
