@@ -332,144 +332,150 @@ async def google_callback(code: str | None = None, state: str | None = None, db:
     # ────────────────────────────────────────────────────────────────────────
 
     # Exchange code for access token
-    async with httpx.AsyncClient() as client:
-        token_response = await client.post(
-            GOOGLE_TOKEN_URL,
-            data={
-                "code": code,
-                "client_id": GOOGLE_CLIENT_ID,
-                "client_secret": GOOGLE_CLIENT_SECRET,
-                "redirect_uri": GOOGLE_REDIRECT_URI,
-                "grant_type": "authorization_code",
-            },
-        )
+    try:
+        async with httpx.AsyncClient() as client:
+            token_response = await client.post(
+                GOOGLE_TOKEN_URL,
+                data={
+                    "code": code,
+                    "client_id": GOOGLE_CLIENT_ID,
+                    "client_secret": GOOGLE_CLIENT_SECRET,
+                    "redirect_uri": GOOGLE_REDIRECT_URI,
+                    "grant_type": "authorization_code",
+                },
+            )
 
-    token_data = token_response.json()
-    access_token = token_data.get("access_token")
+        token_data = token_response.json()
+        access_token = token_data.get("access_token")
 
-    if not access_token:
-        logger.error(f"Google token exchange failed: {token_data}")
-        return RedirectResponse(f"{login_url}?error=google_token_failed")
+        if not access_token:
+            logger.error(f"Google token exchange failed: {token_data}")
+            return RedirectResponse(f"{login_url}?error=google_token_failed")
 
-    # Fetch user info from Google
-    async with httpx.AsyncClient() as client:
-        user_response = await client.get(
-            GOOGLE_USERINFO_URL,
-            headers={"Authorization": f"Bearer {access_token}"},
-        )
+        # Fetch user info from Google
+        async with httpx.AsyncClient() as client:
+            user_response = await client.get(
+                GOOGLE_USERINFO_URL,
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
 
-    google_user = user_response.json()
-    google_email = google_user.get("email")
-    google_name = google_user.get("name") or google_email
+        google_user = user_response.json()
+        google_email = google_user.get("email")
+        google_name = google_user.get("name") or google_email
 
-    if not google_email:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Google user email not available")
+        if not google_email:
+            logger.warning("Google callback: user email not available in userinfo response")
+            return RedirectResponse(f"{login_url}?error=google_no_email")
 
-    # Find or create user
-    user = db.query(User).filter(User.email == google_email).first()
+        # Find or create user
+        user = db.query(User).filter(User.email == google_email).first()
 
-    if not user:
-        # Generate a unique slug for the default tenant to prevent collisions
-        base_slug = f"{google_email.split('@')[0]}-org"
-        import re
-        base_slug = re.sub(r"[^a-zA-Z0-9-]", "", base_slug.replace("_", "-")).lower()
-        if not base_slug:
-            base_slug = "org"
+        if not user:
+            # Generate a unique slug for the default tenant to prevent collisions
+            base_slug = f"{google_email.split('@')[0]}-org"
+            import re
+            base_slug = re.sub(r"[^a-zA-Z0-9-]", "", base_slug.replace("_", "-")).lower()
+            if not base_slug:
+                base_slug = "org"
 
-        slug = base_slug
-        counter = 1
-        while True:
-            existing = db.query(Tenant).filter(Tenant.slug == slug).first()
-            if not existing:
-                break
-            import secrets
-            suffix = secrets.token_hex(3)
-            slug = f"{base_slug}-{suffix}"
-            counter += 1
-            if counter > 20:
-                slug = f"{base_slug}-{secrets.token_hex(6)}"
-                break
+            slug = base_slug
+            counter = 1
+            while True:
+                existing = db.query(Tenant).filter(Tenant.slug == slug).first()
+                if not existing:
+                    break
+                import secrets
+                suffix = secrets.token_hex(3)
+                slug = f"{base_slug}-{suffix}"
+                counter += 1
+                if counter > 20:
+                    slug = f"{base_slug}-{secrets.token_hex(6)}"
+                    break
 
-        tenant = Tenant(
-            name=f"{google_name}'s Workspace",
-            slug=slug,
-            is_active=True,
-        )
-        db.add(tenant)
-        db.flush()
+            tenant = Tenant(
+                name=f"{google_name}'s Workspace",
+                slug=slug,
+                is_active=True,
+            )
+            db.add(tenant)
+            db.flush()
 
-        user = User(
-            email=google_email,
-            full_name=google_name,
-            hashed_password="",  # No local password; Google only
-            tenant_id=tenant.id,
-            role="admin",
-            is_active=True,
-            is_verified=True,
-        )
-        db.add(user)
+            user = User(
+                email=google_email,
+                full_name=google_name,
+                hashed_password="",  # No local password; Google only
+                tenant_id=tenant.id,
+                role="admin",
+                is_active=True,
+                is_verified=True,
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+            logger.info(f"Google user created: {user.email} (Tenant: {tenant.name})")
+        else:
+            logger.info(f"Google user logged in: {user.email}")
+
+        # Update last login
+        user.last_login = datetime.utcnow()
         db.commit()
-        db.refresh(user)
-        logger.info(f"Google user created: {user.email} (Tenant: {tenant.name})")
-    else:
-        logger.info(f"Google user logged in: {user.email}")
 
-    # Update last login
-    user.last_login = datetime.utcnow()
-    db.commit()
+        # Issue token
+        token = auth_service.create_access_token(
+            user_id=str(user.id),
+            tenant_id=str(user.tenant_id),
+            email=user.email,
+            role=(user.role.value if hasattr(user.role, "value") else str(user.role)),
+        )
 
-    # Issue token
-    token = auth_service.create_access_token(
-        user_id=str(user.id),
-        tenant_id=str(user.tenant_id),
-        email=user.email,
-        role=(user.role.value if hasattr(user.role, "value") else str(user.role)),
-    )
+        # Issue short-lived one-time code to avoid token URL exposure
+        import json
+        one_time_code = secrets.token_urlsafe(32)
 
-    # Issue short-lived one-time code to avoid token URL exposure
-    import json
-    one_time_code = secrets.token_urlsafe(32)
-    
-    full_name = user.full_name or ""
-    is_active = True if user.is_active is None else bool(user.is_active)
-    
-    payload_data = {
-        "access_token": token,
-        "token_type": "bearer",
-        "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
-        "user": {
-            "id": str(user.id),
-            "email": user.email,
-            "full_name": full_name,
-            "role": (user.role.value if hasattr(user.role, "value") else str(user.role)),
-            "is_active": is_active,
-            "is_verified": user.is_verified,
-            "tenant_id": str(user.tenant_id),
-            "created_at": user.created_at.isoformat() if hasattr(user.created_at, "isoformat") else str(user.created_at),
-            "last_login": user.last_login.isoformat() if (user.last_login and hasattr(user.last_login, "isoformat")) else (str(user.last_login) if user.last_login else None)
+        full_name = user.full_name or ""
+        is_active = True if user.is_active is None else bool(user.is_active)
+
+        payload_data = {
+            "access_token": token,
+            "token_type": "bearer",
+            "expires_in": settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            "user": {
+                "id": str(user.id),
+                "email": user.email,
+                "full_name": full_name,
+                "role": (user.role.value if hasattr(user.role, "value") else str(user.role)),
+                "is_active": is_active,
+                "is_verified": user.is_verified,
+                "tenant_id": str(user.tenant_id),
+                "created_at": user.created_at.isoformat() if hasattr(user.created_at, "isoformat") else str(user.created_at),
+                "last_login": user.last_login.isoformat() if (user.last_login and hasattr(user.last_login, "isoformat")) else (str(user.last_login) if user.last_login else None)
+            }
         }
-    }
-    
-    cache_service.set(key=f"oauth_code:{one_time_code}", value=json.dumps(payload_data), ttl=60)
 
-    if source == "candidate":
-        import urllib.parse
-        google_user_json = json.dumps({
-            "id": str(user.id),
-            "email": user.email,
-            "firstName": full_name.split()[0] if full_name else "",
-            "lastName": " ".join(full_name.split()[1:]) if full_name and len(full_name.split()) > 1 else "",
-            "resumeUrl": None
-        })
-        user_param = urllib.parse.quote(google_user_json)
-        candidate_base = (settings.CANDIDATE_PORTAL_URL or "http://localhost:5173").rstrip("/")
-        # Redirect to Candidate Portal URL with both one-time code and user parameters
-        redirect_url = f"{candidate_base}/resume?code={one_time_code}&user={user_param}"
-    else:
-        # Redirect to frontend with one-time code as query param
-        redirect_url = f"{FRONTEND_URL}/dashboard?code={one_time_code}"
-        
-    return RedirectResponse(redirect_url)
+        # Store as a dict — cache_service.set() handles json.dumps internally
+        cache_service.set(key=f"oauth_code:{one_time_code}", value=payload_data, ttl=60)
+
+        if source == "candidate":
+            import urllib.parse
+            google_user_json = json.dumps({
+                "id": str(user.id),
+                "email": user.email,
+                "firstName": full_name.split()[0] if full_name else "",
+                "lastName": " ".join(full_name.split()[1:]) if full_name and len(full_name.split()) > 1 else "",
+                "resumeUrl": None
+            })
+            user_param = urllib.parse.quote(google_user_json)
+            candidate_base = (settings.CANDIDATE_PORTAL_URL or "http://localhost:5173").rstrip("/")
+            redirect_url = f"{candidate_base}/resume?code={one_time_code}&user={user_param}"
+        else:
+            redirect_url = f"{FRONTEND_URL}/dashboard?code={one_time_code}"
+
+        return RedirectResponse(redirect_url)
+
+    except Exception as e:
+        logger.exception(f"Unexpected error in Google OAuth callback: {e}")
+        db.rollback()
+        return RedirectResponse(f"{login_url}?error=google_unexpected")
 
 
 logger.warning(f"Google OAuth redirect URI: {GOOGLE_REDIRECT_URI}")

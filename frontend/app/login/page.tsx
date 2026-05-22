@@ -35,6 +35,8 @@ export default function LoginPage() {
       google_no_code: "Google sign-in was cancelled or failed. Please try again.",
       google_invalid_state: "Invalid sign-in request. Please try again.",
       google_token_failed: "Could not complete Google sign-in. Please try again.",
+      google_no_email: "Google did not share your email address. Please check your Google account permissions.",
+      google_unexpected: "An unexpected error occurred during sign-in. Please try again.",
     };
     setErrors({ form: messages[oauthError] ?? "Google sign-in failed. Please try again." });
     // Clean the error param from the URL without a re-navigation
