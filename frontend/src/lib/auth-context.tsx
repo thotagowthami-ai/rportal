@@ -44,9 +44,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const checkAuth = async () => {
       let activeToken = null;
+
       if (typeof window !== "undefined") {
         const params = new URLSearchParams(window.location.search);
         const urlCode = params.get("code");
+
         if (urlCode && API_BASE_URL) {
           try {
             const response = await fetch(`${API_BASE_URL}/api/auth/exchange-code`, {
@@ -61,13 +63,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               window.localStorage.setItem("token", data.access_token);
               activeToken = data.access_token;
               setUser(data.user);
+              // Clean the code from the URL, then navigate to dashboard
+              window.history.replaceState({}, document.title, "/dashboard");
+              setLoading(false);
+              return;
+            } else {
+              console.error("Code exchange failed:", response.status);
             }
           } catch (e) {
             console.error("Failed to exchange one-time login code:", e);
           } finally {
-            // Clean up the URL securely to remove the plain exchange code
-            const newUrl = window.location.pathname;
-            window.history.replaceState({}, document.title, newUrl);
+            // Always remove the code param so it cannot be replayed on refresh
+            if (window.location.search.includes("code=")) {
+              const newUrl = window.location.pathname;
+              window.history.replaceState({}, document.title, newUrl);
+            }
           }
         }
       }

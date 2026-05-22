@@ -211,24 +211,21 @@ def exchange_code(payload: CodeExchangeRequest, db: Session = Depends(get_db)):
     """
     Exchange a short-lived one-time authorization code for a full TokenResponse.
     """
-    import json
-    
     code = payload.code.strip()
     cache_key = f"oauth_code:{code}"
-    
-    # 1. Fetch token details from Redis
-    payload_str = cache_service.get(key=cache_key)
-    if not payload_str:
+
+    # 1. Fetch token details from Redis (cache_service.get already deserializes JSON)
+    data = cache_service.get(key=cache_key)
+    if not data:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired one-time code"
         )
-        
+
     # 2. Delete the cache key immediately to enforce strict one-time use
     cache_service.delete(key=cache_key)
-    
+
     try:
-        data = json.loads(payload_str)
         return TokenResponse(
             access_token=data["access_token"],
             token_type=data["token_type"],
