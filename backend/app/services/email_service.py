@@ -9,6 +9,16 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _mask_email(email: str) -> str:
+    if not email:
+        return ""
+    if "@" in email:
+        local, domain = email.rsplit("@", 1)
+        return f"{local[:2]}***@{domain}"
+    return "***"
+
+
+
 class EmailService:
     def __init__(self) -> None:
         self.smtp_host = settings.SMTP_HOST
@@ -56,7 +66,7 @@ class EmailService:
             logger.warning(
                 "No email provider (SMTP or SendGrid) configured — "
                 "password reset email NOT delivered to %s.",
-                to_email,
+                _mask_email(to_email),
             )
             # Only emit a debug hint in non-production environments,
             # and never log the full token — only the last 4 characters.
@@ -65,7 +75,7 @@ class EmailService:
                 logger.debug(
                     "[DEV] Reset link tail for %s: ...%s  "
                     "(full link intentionally redacted — configure SMTP to deliver email)",
-                    to_email,
+                    _mask_email(to_email),
                     token_hint,
                 )
             return False  # Signal to callers that delivery failed
@@ -96,10 +106,10 @@ class EmailService:
                     server.login(self.smtp_user, self.smtp_password)
                 server.sendmail(self.from_email, to_email, message.as_string())
 
-            logger.info(f"Password reset email sent via SMTP to {to_email}")
+            logger.info(f"Password reset email sent via SMTP to {_mask_email(to_email)}")
             return True
         except Exception as e:
-            logger.error(f"SMTP failed to send email to {to_email}: {str(e)}")
+            logger.error(f"SMTP failed to send email to {_mask_email(to_email)}: {str(e)}")
             return False
 
     def _send_via_sendgrid(self, to_email: str, subject: str, html_content: str) -> bool:
@@ -122,13 +132,13 @@ class EmailService:
             response = sg.send(message)
             
             if response.status_code >= 200 and response.status_code < 300:
-                logger.info(f"Password reset email accepted by SendGrid for {to_email}. Status: {response.status_code}")
+                logger.info(f"Password reset email accepted by SendGrid for {_mask_email(to_email)}. Status: {response.status_code}")
                 return True
             else:
-                logger.error(f"SendGrid rejected email to {to_email}. Status: {response.status_code}, Body: {response.body}")
+                logger.error(f"SendGrid rejected email to {_mask_email(to_email)}. Status: {response.status_code}, Body: {response.body}")
                 return False
         except Exception as e:
-            logger.error(f"SendGrid failed to send email to {to_email}: {str(e)}")
+            logger.error(f"SendGrid failed to send email to {_mask_email(to_email)}: {str(e)}")
             return False
 
 
