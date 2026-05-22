@@ -123,8 +123,14 @@ export default function ResumesPage() {
       await api.postForm("/api/resumes/upload-multiple", formData);
       setUploadMessage("Upload complete!");
       setSelectedFiles([]);
-      const res = await api.get<Candidate[] | { items?: Candidate[] }>("/api/resumes");
-      const list = Array.isArray(res.data) ? res.data : res.data.items ?? [];
+      const res = await api.get<ResumesResponse>("/api/resumes");
+      const list = Array.isArray(res.data)
+        ? res.data
+        : Array.isArray(res.data.items)
+        ? res.data.items
+        : Array.isArray((res.data as { results?: Candidate[] }).results)
+        ? (res.data as { results?: Candidate[] }).results!
+        : [];
       setCandidates(list);
     } catch {
       setUploadMessage("Upload failed. Please try again.");
