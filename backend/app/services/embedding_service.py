@@ -66,8 +66,17 @@ class EmbeddingService:
                     ],
                 )
 
-                summary = response.content[0].text
-                embedding = self._text_to_vector(summary)
+                if (
+                    not getattr(response, "content", None)
+                    or not response.content
+                    or not getattr(response.content[0], "text", None)
+                    or not response.content[0].text.strip()
+                ):
+                    logger.warning("Claude returned empty or invalid content, using fallback local embedding")
+                    embedding = self._text_to_vector(sanitized_text)
+                else:
+                    summary = response.content[0].text
+                    embedding = self._text_to_vector(summary)
 
             # 🔹 Otherwise → local deterministic fallback
             else:
