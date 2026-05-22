@@ -24,7 +24,7 @@ class MatchGenerateSelectedRequest(BaseModel):
 
 class MatchUpdate(BaseModel):
     """Schema for updating match status"""
-    recruiter_status: Optional[str] = Field(None, pattern="^(?i)(new|reviewed|shortlisted|rejected|interviewed|offered)$")
+    recruiter_status: Optional[str] = Field(None, pattern="(?i)^(new|reviewed|shortlisted|rejected|interviewed|offered)$")
     recruiter_notes: Optional[str] = None
 
 class MatchResponse(BaseModel):
