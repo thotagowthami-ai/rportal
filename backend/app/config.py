@@ -94,7 +94,7 @@ class Settings(BaseSettings):
         import secrets
         import warnings
         
-        is_dev = self.ENVIRONMENT in ("development", "local", "test") or self.DEBUG
+        is_dev = self.ENVIRONMENT in ("development", "local", "test")
         insecure_key = "dev-secret-key-CHANGE-IN-PRODUCTION"
         
         if not self.JWT_SECRET_KEY or self.JWT_SECRET_KEY == insecure_key:
