@@ -168,7 +168,7 @@ class DatabaseTask(Task):
                 # Run cleanup in event loop
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    asyncio.create_task(self.cleanup_session())
+                    asyncio.run_coroutine_threadsafe(self.cleanup_session(), loop).result()
                 else:
                     loop.run_until_complete(self.cleanup_session())
             except Exception as e:
