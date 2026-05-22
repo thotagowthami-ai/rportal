@@ -6,11 +6,17 @@ with page_path.open('r', encoding='utf-8') as f:
     content = f.read()
 
 parts = content.split('      {/* SPLIT: ')
+if len(parts) < 5:
+    raise ValueError("Expected at least 4 SPLIT markers in page.tsx layout content.")
 
 part_linkedin = parts[1]
 part_careers = parts[2]
 part_scoring = parts[3]
+
 pipeline_and_rest = parts[4].split('      {/* CTA BANNER */}')
+if len(pipeline_and_rest) < 2:
+    raise ValueError("Expected 'CTA BANNER' marker in page.tsx layout content.")
+
 part_pipeline = pipeline_and_rest[0]
 rest = '      {/* CTA BANNER */}' + pipeline_and_rest[1]
 
