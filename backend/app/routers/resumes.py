@@ -90,11 +90,8 @@ def _to_storage_skills(db: Session, skills=None):
 
 
 def _to_storage_work_experience(db: Session, exp=None):
-    dialect = (db.bind.dialect.name if db.bind is not None else "").lower()
     if exp is None:
         exp = []
-    if dialect == "postgresql":
-        return exp
     return json.dumps(exp)
 
 

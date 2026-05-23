@@ -381,7 +381,6 @@ async def google_callback(code: str | None = None, state: str | None = None, db:
                 existing = db.query(Tenant).filter(Tenant.slug == slug).first()
                 if not existing:
                     break
-                import secrets
                 suffix = secrets.token_hex(3)
                 slug = f"{base_slug}-{suffix}"
                 counter += 1
