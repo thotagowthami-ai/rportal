@@ -1,0 +1,91 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Rportal – Local Development Stack
+# ─────────────────────────────────────────────────────────────────────────────
+# Usage:
+#   docker compose -f docker-compose.dev.yml up --build
+#
+# NOTE: This stack spins up the FastAPI backend and Next.js frontend locally.
+#       By default, the backend uses your cloud services (Neon DB, Upstash Redis,
+#       Cloudflare R2) configured in backend/.env.
+#       If you want a fully offline dev stack, uncomment the 'db' and 'redis'
+#       services below and update DATABASE_URL / REDIS_URL accordingly.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── FastAPI Backend ──────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: rportal_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app          # hot-reload: mount source into container
+      - /app/venv               # keep venv inside container, not overwritten
+    env_file:
+      - ./backend/.env
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+    # If using local Postgres/Redis (uncomment services below), add:
+    # depends_on:
+    #   - db
+    #   - redis
+
+  # ── Next.js Frontend ─────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: rportal_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app         # hot-reload: mount source into container
+      - /app/node_modules       # keep node_modules inside container
+      - /app/.next              # keep .next build cache inside container
+    env_file:
+      - ./frontend/.env.local
+    environment:
+      - NODE_ENV=development
+      - NEXT_TELEMETRY_DISABLED=1
+    depends_on:
+      - backend
+
+  # ── (Optional) Local PostgreSQL ──────────────────────────────────────────
+  # Uncomment this block if you want to run Postgres locally instead of Neon.
+  # Then set DATABASE_URL=postgresql://rportal:rportal@db:5432/rportal in backend/.env
+  #
+  # db:
+  #   image: postgres:15-alpine
+  #   container_name: rportal_db
+  #   restart: unless-stopped
+  #   ports:
+  #     - "127.0.0.1:5432:5432"
+  #   environment:
+  #     POSTGRES_USER: rportal
+  #     POSTGRES_PASSWORD: rportal
+  #     POSTGRES_DB: rportal
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+
+  # ── (Optional) Local Redis ───────────────────────────────────────────────
+  # Uncomment this block if you want to run Redis locally instead of Upstash.
+  # Then set REDIS_URL=redis://redis:6379 in backend/.env
+  #
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: rportal_redis
+  #   restart: unless-stopped
+  #   ports:
+  #     - "127.0.0.1:6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+
+# volumes:
+#   postgres_data:
+#   redis_data:
