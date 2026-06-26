@@ -7,6 +7,9 @@ from app.config import settings
 from app.models.user import User, UserRole
 from uuid import UUID
 from typing import Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 # This tells FastAPI that the token comes from the "Authorization: Bearer" header
@@ -36,32 +39,42 @@ def get_current_user(
     )
 
     if token is None:
+        logger.warning("get_current_user: token is None")
         raise credentials_exception
 
     try:
         payload = _decode_token(token)
+        logger.info(f"get_current_user: Decoded token payload: {payload}")
 
         user_id = payload.get("sub")
         tenant_id = payload.get("tenant_id")
 
         if not user_id or not tenant_id:
+            logger.warning(f"get_current_user: missing user_id ({user_id}) or tenant_id ({tenant_id}) in payload")
             raise credentials_exception
 
         try:
-            user_id = UUID(user_id)
-            tenant_id = UUID(tenant_id)
-        except ValueError:
+            user_id_uuid = UUID(user_id)
+            tenant_id_uuid = UUID(tenant_id)
+        except ValueError as e:
+            logger.warning(f"get_current_user: invalid UUID structure for user_id ({user_id}) or tenant_id ({tenant_id}): {e}")
             raise credentials_exception
-    except JWTError:
+    except JWTError as e:
+        logger.warning(f"get_current_user: JWT decode failed: {e}")
         raise credentials_exception
-    set_tenant_context(db, tenant_id)
+    set_tenant_context(db, tenant_id_uuid)
 
     user = db.query(User).filter(
-        User.id == str(user_id),
-        User.tenant_id == str(tenant_id)
+        User.id == str(user_id_uuid),
+        User.tenant_id == str(tenant_id_uuid)
     ).first()
 
-    if user is None or not user.is_active:
+    if user is None:
+        logger.warning(f"get_current_user: User not found in DB with id={user_id_uuid} and tenant_id={tenant_id_uuid}")
+        raise credentials_exception
+
+    if not user.is_active:
+        logger.warning(f"get_current_user: User {user.email} is inactive")
         raise credentials_exception
     return user
 

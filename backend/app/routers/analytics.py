@@ -15,11 +15,12 @@ from app.models.resume import Resume
 from app.models.user import User
 from app.core.redis_client import redis_client
 from app.config import settings
+from app.services.matching_service import matching_service
 
 logger = logging.getLogger(__name__)
 
 
-router = APIRouter(prefix="/analytics", tags=["analytics"])
+router = APIRouter(prefix="/analytics", tags=["analytics"], redirect_slashes=False)
 
 
 @router.get("/dashboard")
@@ -28,6 +29,8 @@ def get_dashboard_metrics(
     current_user: User = Depends(get_current_user),
 ):
     tenant_id = current_user.tenant_id
+    tenant_id_str = str(tenant_id)
+    allowed_tenant_ids = matching_service._get_allowed_tenant_ids(tenant_id_str)
 
     jobs_count = (
         db.query(JobDescription)
@@ -40,7 +43,7 @@ def get_dashboard_metrics(
     resumes_count = (
         db.query(Resume)
         .filter(
-            Resume.tenant_id == tenant_id,
+            Resume.tenant_id.in_(allowed_tenant_ids),
             Resume.deleted_at.is_(None),
         )
         .count()
@@ -108,7 +111,7 @@ def get_dashboard_metrics(
             Resume.created_at,
         )
         .filter(
-            Resume.tenant_id == tenant_id,
+            Resume.tenant_id.in_(allowed_tenant_ids),
             Resume.deleted_at.is_(None),
         )
         .order_by(Resume.created_at.desc())
@@ -195,6 +198,7 @@ def get_analytics_overview(
     current_user: User = Depends(get_current_user),
 ):
     tenant_id = str(current_user.tenant_id)
+    allowed_tenant_ids = matching_service._get_allowed_tenant_ids(tenant_id)
     now = datetime.utcnow()
     period_start = now - timedelta(days=days)
     prev_start = period_start - timedelta(days=days)
@@ -212,7 +216,7 @@ def get_analytics_overview(
         JobDescription.deleted_at.is_(None),
     )
     resumes_query = db.query(Resume).filter(
-        Resume.tenant_id == tenant_id,
+        Resume.tenant_id.in_(allowed_tenant_ids),
         Resume.deleted_at.is_(None),
     )
     matches_query = db.query(Match).filter(Match.tenant_id == tenant_id)

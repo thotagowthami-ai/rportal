@@ -4,6 +4,8 @@ from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from app.database import get_db, set_tenant_context
 from app.api.deps import get_current_user
+from app.utils.security import create_access_token
+import app.api.deps
 from app.models.resume import Resume
 from app.models.user import User
 from app.services.resume_parser import extract_resume_text, parse_resume_text, is_doc_conversion_available, validate_file, sanitize_filename
@@ -24,7 +26,7 @@ UPLOADS_DIR = os.path.join(BASE_DIR, "uploads")
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/resumes", tags=["Resumes"])
+router = APIRouter(prefix="/resumes", tags=["Resumes"], redirect_slashes=False)
 
 
 def _unwrap_json_value(val):
@@ -80,21 +82,31 @@ def _parse_work_experience(raw_exp):
     return []
 
 
+def _to_pg_array_string(items):
+    if not items:
+        return "{}"
+    escaped = []
+    for item in items:
+        s = str(item).replace('\\', '\\\\').replace('"', '\\"')
+        escaped.append(f'"{s}"')
+    return "{" + ",".join(escaped) + "}"
+
+
 def _to_storage_skills(db: Session, skills=None):
-    dialect = (db.bind.dialect.name if db.bind is not None else "").lower()
     if skills is None:
         skills = []
+    dialect = (db.bind.dialect.name if db.bind is not None else "").lower()
     if dialect == "postgresql":
-        return skills
+        return _to_pg_array_string(skills)
     return json.dumps(skills)
 
 
 def _to_storage_work_experience(db: Session, exp=None):
-    dialect = (db.bind.dialect.name if db.bind is not None else "").lower()
     if exp is None:
         exp = []
+    dialect = (db.bind.dialect.name if db.bind is not None else "").lower()
     if dialect == "postgresql":
-        return exp
+        return _to_pg_array_string(exp)
     return json.dumps(exp)
 
 
@@ -161,7 +173,7 @@ def _allowed_tenant_ids(current_user: User) -> list[str]:
 @router.get("")
 def list_resumes(
     page: int = Query(1, ge=1),
-    page_size: int = Query(10, ge=1, le=100),
+    page_size: int = Query(10, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -191,20 +203,30 @@ def list_resumes(
 async def sync_resumes(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    token: str = Depends(app.api.deps.oauth2_scheme)
 ):
     """
     Manually sync resumes from the Candidate Portal.
     """
     try:
-        set_tenant_context(db, str(current_user.tenant_id))
+        portal_tenant_id = str(
+            settings.CANDIDATE_PORTAL_TENANT_ID
+            or settings.RECRUITING_TENANT_ID
+            or current_user.tenant_id
+        ).strip()
+
+        set_tenant_context(db, portal_tenant_id)
         resumes = await matching_service.sync_portal_resumes(
             db=db,
-            tenant_id=str(current_user.tenant_id),
+            tenant_id=portal_tenant_id,
             uploaded_by=str(current_user.id),
+            token=token
         )
         try:
             from app.routers.analytics import invalidate_analytics_cache
             invalidate_analytics_cache(str(current_user.tenant_id))
+            if portal_tenant_id != str(current_user.tenant_id):
+                invalidate_analytics_cache(portal_tenant_id)
         except Exception:
             pass
         return {
@@ -566,23 +588,19 @@ def get_download_user(
             detail="Authentication credentials are required."
         )
         
-    payload_str = cache_service.get(key=f"download_token:{token}")
-    if not payload_str:
+    from jose import jwt
+    from app.config import settings
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+    except Exception:
         raise HTTPException(
             status_code=403,
             detail="Invalid or expired download token"
         )
         
-    # Enforce strict one-time use immediately
-    cache_service.delete(key=f"download_token:{token}")
-    
-    try:
-        payload = json.loads(payload_str)
-        user_id = payload.get("user_id")
-        tenant_id = payload.get("tenant_id")
-        if not user_id or not tenant_id:
-            raise ValueError()
-    except Exception:
+    user_id = payload.get("user_id")
+    tenant_id = payload.get("tenant_id")
+    if not user_id or not tenant_id:
         raise HTTPException(status_code=403, detail="Invalid token structure")
 
     set_tenant_context(db, uuid.UUID(tenant_id))
@@ -620,19 +638,18 @@ def generate_download_token(
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
         
-    import secrets
-    import json
-    from app.services.cache_service import cache_service
+    from jose import jwt
+    from datetime import datetime, timedelta
+    from app.config import settings
     
-    download_token = secrets.token_urlsafe(32)
     payload = {
         "user_id": str(current_user.id),
         "tenant_id": str(current_user.tenant_id),
-        "resume_id": str(resume.id)
+        "resume_id": str(resume.id),
+        "exp": datetime.utcnow() + timedelta(seconds=60)
     }
-    # 15-second TTL is extremely secure and robust for browser transitions
-    # Pass dict directly — cache_service.set() handles json.dumps internally
-    cache_service.set(key=f"download_token:{download_token}", value=payload, ttl=15)
+    
+    download_token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
     return {"download_token": download_token}
 
 
@@ -641,6 +658,7 @@ def generate_download_token(
 def download_resume(
     resume_id: str,
     request: Request,
+    download: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_download_user),
 ):
@@ -664,16 +682,28 @@ def download_resume(
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
 
+    disposition = "attachment" if download else "inline"
     file_path = resume.file_path if resume.file_path else None
     
     # 1. Handle Candidate Portal resumes (Proxy)
     if file_path and file_path.startswith("candidate_portal/"):
         candidate_id = file_path.replace("candidate_portal/", "")
-        portal_base = getattr(settings, "CANDIDATE_PORTAL_URL", "https://candidateportal-production.up.railway.app/api")
+        portal_base = getattr(settings, "CANDIDATE_PORTAL_URL", None) or "https://candidateportal-production.up.railway.app/api"
         download_url = f"{portal_base}/resumes/{candidate_id}/download"
         try:
+            # Try to extract token from Authorization header if available
+            auth_header = request.headers.get("Authorization")
+            if auth_header and auth_header.lower().startswith("bearer "):
+                req_token = auth_header.split(" ", 1)[1]
+            else:
+                # Generate a temporary fresh token for the current user to pass to Candidate Portal
+                req_token = create_access_token(
+                    subject=str(current_user.id),
+                    additional_claims={"tenant_id": str(current_user.tenant_id)}
+                )
+            
             with httpx.Client(timeout=20.0, follow_redirects=True) as client:
-                portal_resp = client.get(download_url)
+                portal_resp = client.get(download_url, headers=matching_service._portal_headers(req_token))
                 if portal_resp.status_code == 200:
                     content = portal_resp.content
                     media_type = portal_resp.headers.get("content-type", "application/pdf")
@@ -681,8 +711,7 @@ def download_resume(
                     return StreamingResponse(
                         iter([content]),
                         media_type=media_type,
-                        # CHANGED TO INLINE
-                        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+                        headers={"Content-Disposition": f'{disposition}; filename="{filename}"'},
                     )
         except Exception as e:
             logger.warning(f"Portal proxy download failed for {candidate_id}: {e}")
@@ -691,10 +720,36 @@ def download_resume(
     # 2. Try R2 storage or cloud URLs
     if file_path:
         if file_path.startswith("http://") or file_path.startswith("https://"):
-            refreshed_url = storage_service.get_url_for_key(file_path)
-            if refreshed_url:
-                return RedirectResponse(url=refreshed_url)
-            return RedirectResponse(url=file_path)
+            # Try to fetch directly from our configured R2 bucket via boto3 to avoid public CORS issues
+            obj = storage_service.get_object_stream(file_path)
+            if obj:
+                body, _length = obj
+                ext = (resume.file_type or "").lower()
+                media_type = "application/pdf" if "pdf" in ext else "application/octet-stream"
+                return StreamingResponse(
+                    body.iter_chunks(chunk_size=1024 * 1024),
+                    media_type=media_type,
+                    headers={"Content-Disposition": f'{disposition}; filename="{resume.file_name or "resume.pdf"}"'},
+                )
+            
+            # If not in our R2 or boto3 failed, proxy it via httpx
+            try:
+                with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+                    resp = client.get(file_path)
+                    if resp.status_code == 200:
+                        content = resp.content
+                        media_type = resp.headers.get("content-type", "application/pdf")
+                        return StreamingResponse(
+                            iter([content]),
+                            media_type=media_type,
+                            headers={"Content-Disposition": f'{disposition}; filename="{resume.file_name or "resume.pdf"}"'},
+                        )
+            except Exception as e:
+                logger.warning(f"Failed to proxy external URL {file_path}: {e}")
+            
+            # Absolute fallback: redirect the browser
+            refreshed_url = storage_service.get_url_for_key(file_path, disposition=disposition, filename=resume.file_name)
+            return RedirectResponse(url=refreshed_url or file_path)
             
         obj = storage_service.get_object_stream(file_path)
         if obj:
@@ -709,8 +764,7 @@ def download_resume(
             return StreamingResponse(
                 body.iter_chunks(chunk_size=1024 * 1024),
                 media_type=media_type,
-                # CHANGED TO INLINE
-                headers={"Content-Disposition": f'inline; filename="{resume.file_name}"'},
+                headers={"Content-Disposition": f'{disposition}; filename="{resume.file_name}"'},
             )
 
     # 3. Fallback: Search local uploads folder
@@ -738,11 +792,10 @@ def download_resume(
         media_type_map = {"pdf": "application/pdf", "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "doc": "application/msword"}
         media_type = media_type_map.get(ext, "application/octet-stream")
         
-        # CHANGED TO INLINE
         return FileResponse(
             path=local_path, 
             media_type=media_type,
-            headers={"Content-Disposition": f'inline; filename="{resume.file_name}"'}
+            headers={"Content-Disposition": f'{disposition}; filename="{resume.file_name}"'}
         )
 
     raise HTTPException(status_code=404, detail=f"Resume file '{resume.file_name}' not found. Please re-upload.")

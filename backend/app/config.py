@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     # Security
     JWT_SECRET_KEY: str = "dev-secret-key-CHANGE-IN-PRODUCTION"
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
 
     # Database / Infra
      # Database / Infra
@@ -93,6 +93,7 @@ class Settings(BaseSettings):
         
         import secrets
         import warnings
+        import hashlib
         
         is_dev = self.ENVIRONMENT in ("development", "local", "test")
         insecure_key = "dev-secret-key-CHANGE-IN-PRODUCTION"
@@ -103,10 +104,14 @@ class Settings(BaseSettings):
                     "JWT_SECRET_KEY must be explicitly set via environment variables in production"
                 )
             else:
-                self.JWT_SECRET_KEY = secrets.token_urlsafe(32)
+                if self.DATABASE_URL:
+                    # Derive a consistent key from database URL to ensure all worker processes share it
+                    self.JWT_SECRET_KEY = hashlib.sha256(self.DATABASE_URL.encode()).hexdigest()
+                else:
+                    self.JWT_SECRET_KEY = secrets.token_urlsafe(32)
                 warnings.warn(
-                    "JWT_SECRET_KEY was unset or insecure. A secure, random key has been "
-                    "generated for local development. Note: Tokens will invalidate on restart.",
+                    "JWT_SECRET_KEY was unset or insecure. A secure fallback key has been "
+                    "generated. Note: Tokens will invalidate on database connection change or restart.",
                     UserWarning
                 )
 

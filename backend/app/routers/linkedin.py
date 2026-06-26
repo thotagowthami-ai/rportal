@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
+import logging
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,6 +15,8 @@ from app.config import settings
 from app.database import get_db
 from app.models.linkedin_account import LinkedInAccount
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/linkedin", tags=["linkedin"])
@@ -107,6 +110,10 @@ async def connect_linkedin(
     payload: ConnectRequest,
     current_user: User = Depends(get_current_user),
 ):
+    logger.info(f"connect_linkedin: payload={payload}, user_id={current_user.id}")
+    logger.info(f"connect_linkedin: LINKEDIN_CLIENT_ID={settings.LINKEDIN_CLIENT_ID}")
+    logger.info(f"connect_linkedin: LINKEDIN_REDIRECT_URI={settings.LINKEDIN_REDIRECT_URI}")
+    logger.info(f"connect_linkedin: FRONTEND_URL={settings.FRONTEND_URL}")
     _require_linkedin_config()
     state = _build_state_token(current_user, payload.return_to)
 
@@ -118,6 +125,7 @@ async def connect_linkedin(
         "scope": settings.LINKEDIN_SCOPES,
     }
     auth_url = f"https://www.linkedin.com/oauth/v2/authorization?{urlencode(params)}"
+    logger.info(f"connect_linkedin: Generated auth_url={auth_url}")
     return ConnectResponse(auth_url=auth_url)
 
 
@@ -129,6 +137,7 @@ async def linkedin_callback(
     error_description: str | None = Query(default=None),
     db: Session = Depends(get_db),
 ):
+    logger.info(f"linkedin_callback: Initiated with code={code[:10] if code else None}, state={state[:15] if state else None}, error={error}, error_description={error_description}")
     _require_linkedin_config()
 
     if error:
@@ -137,9 +146,12 @@ async def linkedin_callback(
         params = {"linkedin": "error"}
         if error_description:
             params["reason"] = error_description
-        return RedirectResponse(f"{base_url}?{urllib.parse.urlencode(params)}")
+        redirect_url = f"{base_url}?{urllib.parse.urlencode(params)}"
+        logger.warning(f"linkedin_callback: LinkedIn returned error. Redirecting to {redirect_url}")
+        return RedirectResponse(redirect_url)
 
     if not code or not state:
+        logger.error("linkedin_callback: Missing code or state parameters!")
         raise HTTPException(status_code=400, detail="Missing LinkedIn callback params")
 
     try:

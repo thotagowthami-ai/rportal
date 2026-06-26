@@ -1,5 +1,5 @@
 "use client";
-
+import { getApiUrl } from "../../api";
 import { FormEvent, Suspense, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -54,7 +54,7 @@ function ResetPasswordContent() {
 
     try {
       setIsLoading(true);
-      const baseUrl = process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") ?? "";
+      const baseUrl = getApiUrl()?.replace(/\/$/, "") ?? "";
       const res = await fetch(`${baseUrl}/api/auth/reset-password`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },

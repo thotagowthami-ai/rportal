@@ -1,5 +1,5 @@
 "use client";
-
+import { getApiUrl } from "../../api";
 import { FormEvent, useMemo, useState } from "react";
 import Link from "next/link";
 
@@ -37,7 +37,7 @@ export default function ForgotPasswordPage() {
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
 
-    const apiBase = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+    const apiBase = (getApiUrl() || "").trim();
     const resetUrl = apiBase ? `${apiBase}/api/auth/forgot-password` : "/api/auth/forgot-password";
 
     try {

@@ -13,6 +13,7 @@ import httpx
 import uuid
 import json
 import os
+import hashlib
 
 logger = logging.getLogger(__name__)
 
@@ -100,13 +101,56 @@ class MatchingService:
     def __init__(self):
         self.claude_client = Anthropic(api_key=settings.CLAUDE_API_KEY) if settings.CLAUDE_API_KEY else None
         self.min_score_threshold = 0.0
-        self.candidate_portal_url = getattr(
-            settings,
-            "CANDIDATE_PORTAL_URL",
-            "http://localhost:3000/api",
-        ).rstrip("/")
+        portal_url = getattr(settings, "CANDIDATE_PORTAL_URL", None) or "https://candidateportal-production.up.railway.app/api"
+        self.candidate_portal_url = portal_url.rstrip("/")
         # Gemini API key (same one used in TalentScout)
         self.gemini_api_key = getattr(settings, "GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
+
+    @staticmethod
+    def _portal_headers(request_token: Optional[str] = None) -> Dict[str, str]:
+        api_key = str(
+            os.environ.get("CANDIDATE_PORTAL_API_KEY", "")
+            or getattr(settings, "CANDIDATE_PORTAL_API_KEY", "")
+        ).strip().strip("\"'")
+
+        # Read the deployed environment directly first. This also works when
+        # the Settings model has not declared CANDIDATE_PORTAL_API_TOKEN.
+        token = str(
+            os.environ.get("CANDIDATE_PORTAL_API_TOKEN", "")
+            or getattr(settings, "CANDIDATE_PORTAL_API_TOKEN", "")
+        ).strip()
+
+        # Be tolerant of common Railway variable paste formats.
+        if token.startswith("CANDIDATE_PORTAL_API_TOKEN="):
+            token = token.split("=", 1)[1].strip()
+        token = token.strip("\"'")
+        if token.lower().startswith("bearer "):
+            token = token[7:].strip()
+
+        headers = {"Accept": "application/json"}
+        
+        active_token = request_token or token
+        if active_token:
+            if active_token.lower().startswith("bearer "):
+                active_token = active_token[7:].strip()
+            fingerprint = hashlib.sha256(active_token.encode("utf-8")).hexdigest()[:8]
+            logger.info("Candidate Portal authorization configured (token fingerprint=%s)", fingerprint)
+            headers["Authorization"] = f"Bearer {active_token}"
+            return headers
+
+        if api_key:
+            headers["x-api-key"] = api_key
+            fingerprint = hashlib.sha256(api_key.encode("utf-8")).hexdigest()[:8]
+            logger.info(
+                "Candidate Portal API-key authorization configured (fingerprint=%s)",
+                fingerprint,
+            )
+            return headers
+
+        logger.warning(
+            "Candidate Portal authentication is not configured; set CANDIDATE_PORTAL_API_KEY"
+        )
+        return headers
 
     @staticmethod
     def _to_storage_list(db: Session, value) -> Any:
@@ -126,7 +170,7 @@ class MatchingService:
         return value
 
     async def _fetch_from_candidate_portal(
-        self, job_description: str, tenant_id: Optional[str] = None
+        self, job_description: str, tenant_id: Optional[str] = None, token: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         cleaned_tenant_id = self._clean_tenant_id(tenant_id)
         params = {"tenant_id": cleaned_tenant_id} if cleaned_tenant_id else None
@@ -144,6 +188,7 @@ class MatchingService:
                     f"{self.candidate_portal_url}/match/jd",
                     params=params,
                     json=payload,
+                    headers=self._portal_headers(token),
                 )
                 if response.status_code in (200, 201):
                     data = response.json()
@@ -164,7 +209,7 @@ class MatchingService:
             logger.warning(f"Failed to fetch from Candidate Portal: {e}")
             return []
 
-    async def _fetch_portal_resumes_list(self, tenant_id: Optional[str]) -> List[Dict[str, Any]]:
+    async def _fetch_portal_resumes_list(self, tenant_id: Optional[str], token: Optional[str] = None) -> List[Dict[str, Any]]:
         cleaned_tenant_id = self._clean_tenant_id(tenant_id)
         params = {"tenant_id": cleaned_tenant_id} if cleaned_tenant_id else None
         try:
@@ -172,6 +217,7 @@ class MatchingService:
                 response = await client.get(
                     f"{self.candidate_portal_url}/resumes",
                     params=params,
+                    headers=self._portal_headers(token),
                 )
                 if response.status_code in (200, 201):
                     data = response.json()
@@ -214,6 +260,8 @@ class MatchingService:
 
         if existing:
             existing.skills = skills_value
+            from datetime import datetime
+            existing.updated_at = datetime.utcnow() # Force update to trigger re-match
             return existing
 
         resume = Resume(
@@ -236,19 +284,33 @@ class MatchingService:
         db.add(resume)
         return resume
 
-    async def sync_portal_resumes(self, db: Session, tenant_id: str, uploaded_by: str) -> List[Resume]:
+    async def sync_portal_resumes(self, db: Session, tenant_id: str, uploaded_by: str, job: Optional[JobDescription] = None, token: Optional[str] = None) -> List[Resume]:
         logger.info(f"Syncing portal resumes for tenant {tenant_id}")
         portal_tenant_id = self._clean_tenant_id(
             settings.CANDIDATE_PORTAL_TENANT_ID or settings.RECRUITING_TENANT_ID or tenant_id
         )
-        # Use a rich skill blob to avoid "no known skills" responses from the portal.
-        portal_results = await self._fetch_from_candidate_portal(
-            job_description="python, javascript, react, node, sql, aws, docker, kubernetes, devops, api",
-            tenant_id=portal_tenant_id,
-        )
+        
+        # Always fetch the full list of resumes directly to ensure no candidates are missed
+        portal_results = await self._fetch_portal_resumes_list(tenant_id=portal_tenant_id, token=token)
+        
         if not portal_results:
-            # Fallback to a direct resumes list endpoint if available.
-            portal_results = await self._fetch_portal_resumes_list(tenant_id=portal_tenant_id)
+            logger.info("Direct resume list failed or empty, falling back to rich skill blob match...")
+            
+            # Use the actual job skills if available, otherwise a very broad fallback
+            fallback_query = "python, javascript, react, node, sql, aws, docker, kubernetes, devops, api"
+            if job:
+                job_skills = _normalize_list(job.required_skills) + _normalize_list(job.preferred_skills)
+                if job_skills:
+                    fallback_query = ", ".join(job_skills)
+                elif job.title:
+                    fallback_query = job.title
+
+            portal_results = await self._fetch_from_candidate_portal(
+                job_description=fallback_query,
+                tenant_id=portal_tenant_id,
+                token=token,
+            )
+
         resumes = []
         for candidate in portal_results:
             resume = self._sync_candidate_to_resume(
@@ -333,7 +395,7 @@ Return ONLY a valid JSON object in this exact format:
 }}"""
 
             response = client.models.generate_content(
-                model="gemini-2.5-flash",
+                model=settings.GEMINI_MODEL or "gemini-2.0-flash",
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     temperature=0.2,
@@ -362,12 +424,19 @@ Return ONLY a valid JSON object in this exact format:
             logger.info(f"Gemini match score for resume {resume.id}: {result.get('matchPercentage')}%")
             return result
 
-        except ImportError:
-            logger.warning("google-genai not installed. Run: pip install google-genai")
+        except ImportError as e:
+            logger.warning(f"google-genai not installed: {e}. Run: pip install google-genai")
             return {}
         except Exception as e:
-            logger.error(f"Gemini analysis failed: {e}")
+            logger.error(f"Gemini analysis failed for resume {resume.id}: {type(e).__name__}: {e}", exc_info=True)
             return {}
+
+    def _get_allowed_tenant_ids(self, tenant_id: str) -> List[str]:
+        tenant_ids = [tenant_id]
+        portal_tid = str(settings.CANDIDATE_PORTAL_TENANT_ID or settings.RECRUITING_TENANT_ID or "").strip()
+        if portal_tid and portal_tid != tenant_id:
+            tenant_ids.append(portal_tid)
+        return tenant_ids
 
     async def generate_matches_for_job(
         self,
@@ -376,6 +445,7 @@ Return ONLY a valid JSON object in this exact format:
         tenant_id: str,
         limit: int = 50,
         resume_ids: Optional[List[str]] = None,
+        token: Optional[str] = None,
     ) -> List[Match]:
         logger.info(f"Generating matches for job {job_id}")
 
@@ -387,95 +457,35 @@ Return ONLY a valid JSON object in this exact format:
         if not job:
             raise ValueError(f"Job description {job_id} not found or access denied for tenant {tenant_id}")
 
+        allowed_tenant_ids = self._get_allowed_tenant_ids(tenant_id)
+
         local_resume_count = db.query(Resume).filter(
-            Resume.tenant_id == tenant_id
+            Resume.tenant_id.in_(allowed_tenant_ids)
         ).count()
         logger.info(f"Local resumes count: {local_resume_count}")
 
-        if local_resume_count == 0:
-            logger.info("No local resumes found, fetching from Candidate Portal...")
-            portal_tenant_id = self._clean_tenant_id(
-                settings.CANDIDATE_PORTAL_TENANT_ID or settings.RECRUITING_TENANT_ID or tenant_id
-            )
-            portal_results = await self._fetch_from_candidate_portal(
-                job_description=job.description or "",
-                tenant_id=portal_tenant_id,
-            )
-            logger.info(f"Got {len(portal_results)} candidates from Candidate Portal")
-
-            if portal_results:
-                from app.models.user import User
-                admin_user = db.query(User).filter(User.tenant_id == tenant_id).first()
-                uploaded_by = str(admin_user.id) if admin_user else str(uuid.uuid4())
-
-                matches: List[Match] = []
-
-                for candidate in portal_results:
-                    resume = self._sync_candidate_to_resume(
-                        candidate=candidate,
-                        tenant_id=tenant_id,
-                        uploaded_by=uploaded_by,
-                        db=db,
-                    )
-
-                    existing_match = (
-                        db.query(Match)
-                        .filter(
-                            and_(
-                                Match.job_description_id == job_id,
-                                Match.resume_id == resume.id,
-                            )
-                        )
-                        .first()
-                    )
-
-                    if existing_match:
-                        continue
-
-                    match_score = float(candidate.get("matchScore", 0))
-                    matched_skills = candidate.get("matchedSkills", [])
-                    missing_skills = candidate.get("missingSkills", [])
-
-                    match_reasoning = (
-                        f"Match score: {match_score}%. "
-                        f"Matched skills: {', '.join(matched_skills[:5])}. "
-                        f"Missing skills: {', '.join(missing_skills[:3])}."
-                    )
-
-                    match = Match(
-                        tenant_id=tenant_id,
-                        job_description_id=job_id,
-                        resume_id=resume.id,
-                        overall_score=match_score,
-                        skill_match_score=match_score,
-                        experience_match_score=50.0,
-                        education_match_score=50.0,
-                        matched_skills=matched_skills,
-                        missing_skills=missing_skills,
-                        match_reasoning=match_reasoning,
-                        recruiter_status=MatchStatus.NEW.name,
-                    )
-
-                    db.add(match)
-                    matches.append(match)
-
-                    if len(matches) >= limit:
-                        break
-
-                db.commit()
-                logger.info(f"Created {len(matches)} matches from Candidate Portal")
-                return matches
+        # Always try to sync from candidate portal before matching
+        try:
+            logger.info("Syncing latest resumes from Candidate Portal before matching...")
+            from app.models.user import User
+            admin_user = db.query(User).filter(User.tenant_id == tenant_id).first()
+            uploaded_by = str(admin_user.id) if admin_user else str(uuid.uuid4())
+            import asyncio; asyncio.create_task(self.sync_portal_resumes(db, tenant_id, uploaded_by, job, token))
+        except Exception as e:
+            logger.warning(f"Failed to auto-sync resumes before matching: {type(e).__name__}: {e}")
 
         # Local matching
         if resume_ids:
             selected_resumes = (
                 db.query(Resume)
                 .filter(
-                    Resume.tenant_id == tenant_id,
+                    Resume.tenant_id.in_(allowed_tenant_ids),
                     Resume.id.in_(resume_ids),
                 )
                 .all()
             )
+            if not selected_resumes:
+                raise ValueError(f"No resumes found for given IDs in allowed tenants. resume_ids: {resume_ids}, allowed: {allowed_tenant_ids}")
             resumes_to_match = selected_resumes
         else:
             # Safely get embedding as list
@@ -492,9 +502,9 @@ Return ONLY a valid JSON object in this exact format:
                 )
                 resumes_to_match = (
                     db.query(Resume)
-                    .filter(Resume.tenant_id == tenant_id)
+                    .filter(Resume.tenant_id.in_(allowed_tenant_ids))
                     .order_by(Resume.created_at.desc())
-                    .limit(limit * 2)
+                    .limit(limit)
                     .all()
                 )
             else:
@@ -503,24 +513,36 @@ Return ONLY a valid JSON object in this exact format:
                         job_embedding=job_emb,
                         tenant_id=tenant_id,
                         db=db,
-                        limit=limit * 2,
+                        limit=10000,
                     )
                     resume_ids_from_vector = [r["id"] for r in similar_resumes]
                     if resume_ids_from_vector:
-                        resumes_to_match = (
+                        vector_resumes = (
                             db.query(Resume)
                             .filter(
-                                Resume.tenant_id == tenant_id,
+                                Resume.tenant_id.in_(allowed_tenant_ids),
                                 Resume.id.in_(resume_ids_from_vector),
                             )
                             .all()
                         )
+                        recent_resumes = (
+                            db.query(Resume)
+                            .filter(Resume.tenant_id.in_(allowed_tenant_ids))
+                            .order_by(Resume.created_at.desc())
+                            .limit(limit)
+                            .all()
+                        )
+                        # Combine and deduplicate
+                        resumes_dict = {r.id: r for r in vector_resumes}
+                        for r in recent_resumes:
+                            resumes_dict[r.id] = r
+                        resumes_to_match = list(resumes_dict.values())
                     else:
                         resumes_to_match = (
                             db.query(Resume)
-                            .filter(Resume.tenant_id == tenant_id)
+                            .filter(Resume.tenant_id.in_(allowed_tenant_ids))
                             .order_by(Resume.created_at.desc())
-                            .limit(limit * 2)
+                            .limit(limit)
                             .all()
                         )
                 except Exception as e:
@@ -528,94 +550,160 @@ Return ONLY a valid JSON object in this exact format:
                     db.rollback()
                     resumes_to_match = (
                         db.query(Resume)
-                        .filter(Resume.tenant_id == tenant_id)
+                        .filter(Resume.tenant_id.in_(allowed_tenant_ids))
                         .order_by(Resume.created_at.desc())
-                        .limit(limit * 2)
+                        .limit(limit)
                         .all()
                     )
 
+        # Fetch all existing matches for this job to avoid N+1 queries and to sort priorities
+        existing_matches_list = (
+            db.query(Match)
+            .filter(Match.job_description_id == job_id)
+            .all()
+        )
+        existing_matches = {m.resume_id: m for m in existing_matches_list}
+
+        # Sort resumes to prioritize ones without a match first, then ones needing an update
+        def get_priority(r):
+            em = existing_matches.get(r.id)
+            if not em:
+                return 0 # No match yet: highest priority
+            if job.updated_at and em.updated_at and em.updated_at < job.updated_at:
+                return 1 # Outdated match: medium priority
+            if r.updated_at and em.updated_at and em.updated_at < r.updated_at:
+                return 1 # Outdated match due to resume update
+            return 2 # Up-to-date match: lowest priority
+
+        resumes_to_match.sort(key=get_priority)
+
+        new_generations = 0
         matches: List[Match] = []
+        errors: List[str] = []
 
         for resume in resumes_to_match:
-            existing_match = (
-                db.query(Match)
-                .filter(
-                    and_(
-                        Match.job_description_id == job_id,
-                        Match.resume_id == resume.id,
+            try:
+                existing_match = existing_matches.get(resume.id)
+                
+                if existing_match:
+                    job_newer = job.updated_at and existing_match.updated_at and existing_match.updated_at < job.updated_at
+                    resume_newer = resume.updated_at and existing_match.updated_at and existing_match.updated_at < resume.updated_at
+                    
+                    # Only skip regeneration if up-to-date AND we aren't explicitly forcing it with selected resume_ids
+                    if not job_newer and not resume_newer and not resume_ids:
+                        matches.append(existing_match)
+                        continue
+
+                # If we've reached the generation limit, skip analyzing any MORE new/outdated resumes in this run.
+                # But continue looping so we can collect all the up-to-date existing matches.
+                if new_generations >= limit and not resume_ids:
+                    continue
+
+                if existing_match:
+                    match = existing_match
+                else:
+                    match = Match(
+                        tenant_id=tenant_id,
+                        job_description_id=job_id,
+                        resume_id=resume.id,
+                        recruiter_status=MatchStatus.NEW.name,
                     )
-                )
-                .first()
-            )
-            if existing_match:
+                    db.add(match)
+
+                # ✅ Try Gemini first (same as TalentScout)
+                gemini_result = await self._analyze_with_gemini(job=job, resume=resume)
+                new_generations += 1
+
+                if gemini_result and "matchPercentage" in gemini_result:
+                    # Use Gemini scores
+                    try:
+                        raw_score = gemini_result.get("matchPercentage", 0)
+                        if raw_score in (None, "", "N/A", "null"):
+                            overall_score = 0.0
+                        else:
+                            overall_score = float(raw_score)
+                    except Exception as e:
+                        logger.warning(f"Failed to parse matchPercentage from Gemini: {raw_score}. Error: {e}")
+                        overall_score = 0.0
+
+                    matched_req = gemini_result.get("matchedRequired") or []
+                    matched_nice = gemini_result.get("matchedNiceToHave") or []
+                    missing_req = gemini_result.get("missingRequired") or []
+                    missing_nice = gemini_result.get("missingNiceToHave") or []
+
+                    matched_skills = matched_req + matched_nice
+                    missing_skills = missing_req + missing_nice
+                    summary = gemini_result.get("summary", "")
+                    verdict = gemini_result.get("finalVerdict", "")
+                    experience_gap = gemini_result.get("experienceGap", "")
+
+                    match_reasoning = f"{summary} Verdict: {verdict}. {experience_gap}".strip()
+
+                    # Estimate sub-scores from Gemini data
+                    job_required = _normalize_list(job.required_skills)
+                    matched_required = gemini_result.get("matchedRequired") or []
+                    skill_match_score = (len(matched_required) / max(len(job_required), 1)) * 100
+
+                    experience_score = self._calculate_experience_score(
+                        required_years=job.experience_required,
+                        candidate_years=resume.experience_years,
+                    )
+
+                else:
+                    # ✅ Fallback to basic scoring if Gemini unavailable
+                    logger.info(f"Falling back to basic scoring for resume {resume.id}")
+                    vector_score = 0.5
+                    scores = self._calculate_match_scores(job, resume, vector_score)
+                    overall_score = scores["overall_score"]
+                    matched_skills = scores["matched_skills"]
+                    missing_skills = scores["missing_skills"]
+                    skill_match_score = scores["skill_match_score"]
+                    experience_score = scores["experience_match_score"]
+                    match_reasoning = await self._generate_match_explanation(
+                        job=job,
+                        resume=resume,
+                        scores=scores,
+                        tenant_id=tenant_id,
+                    )
+
+                cache_key = f"match_explanation:{job_id}:{resume.id}"
+                cache_service.delete(cache_key, tenant_id=tenant_id)
+
+                # Only filter out low scores if we are bulk-generating. If explicitly requested, keep it.
+                if overall_score < self.min_score_threshold and not resume_ids:
+                    logger.debug(f"Match score {overall_score} below threshold {self.min_score_threshold} for resume {resume.id}")
+                    continue
+
+                match.overall_score = round(overall_score, 2)
+                match.skill_match_score = round(skill_match_score, 2)
+                match.experience_match_score = round(experience_score, 2)
+                match.education_match_score = 50.0
+                match.matched_skills = matched_skills
+                match.missing_skills = missing_skills
+                match.match_reasoning = match_reasoning
+
+                if not existing_match:
+                    matches.append(match)
+                else:
+                    matches.append(match) # Also append updated matches so they are returned
+                    
+            except Exception as e:
+                import traceback
+                logger.error(f"Error processing resume {resume.id} for job {job_id}:\n{traceback.format_exc()}")
+                errors.append(f"Resume {resume.id}: {type(e).__name__}: {str(e)}")
                 continue
 
-            # ✅ Try Gemini first (same as TalentScout)
-            gemini_result = await self._analyze_with_gemini(job=job, resume=resume)
+        if not matches and resumes_to_match:
+            raise ValueError(f"Match generation returned empty list! Errors: {errors}. resumes_to_match length: {len(resumes_to_match)}")
 
-            if gemini_result and "matchPercentage" in gemini_result:
-                # Use Gemini scores
-                overall_score = float(gemini_result["matchPercentage"])
-                matched_skills = gemini_result.get("matchedRequired", []) + gemini_result.get("matchedNiceToHave", [])
-                missing_skills = gemini_result.get("missingRequired", []) + gemini_result.get("missingNiceToHave", [])
-                summary = gemini_result.get("summary", "")
-                verdict = gemini_result.get("finalVerdict", "")
-                experience_gap = gemini_result.get("experienceGap", "")
-
-                match_reasoning = f"{summary} Verdict: {verdict}. {experience_gap}".strip()
-
-                # Estimate sub-scores from Gemini data
-                job_required = _normalize_list(job.required_skills)
-                matched_required = gemini_result.get("matchedRequired", [])
-                skill_match_score = (len(matched_required) / max(len(job_required), 1)) * 100
-
-                experience_score = self._calculate_experience_score(
-                    required_years=job.experience_required,
-                    candidate_years=resume.experience_years,
-                )
-
-            else:
-                # ✅ Fallback to basic scoring if Gemini unavailable
-                logger.info(f"Falling back to basic scoring for resume {resume.id}")
-                vector_score = 0.5
-                scores = self._calculate_match_scores(job, resume, vector_score)
-                overall_score = scores["overall_score"]
-                matched_skills = scores["matched_skills"]
-                missing_skills = scores["missing_skills"]
-                skill_match_score = scores["skill_match_score"]
-                experience_score = scores["experience_match_score"]
-                match_reasoning = await self._generate_match_explanation(
-                    job=job,
-                    resume=resume,
-                    scores=scores,
-                    tenant_id=tenant_id,
-                )
-
-            if overall_score < self.min_score_threshold:
-                continue
-
-            match = Match(
-                tenant_id=tenant_id,
-                job_description_id=job_id,
-                resume_id=resume.id,
-                overall_score=round(overall_score, 2),
-                skill_match_score=round(skill_match_score, 2),
-                experience_match_score=round(experience_score, 2),
-                education_match_score=50.0,
-                matched_skills=matched_skills,
-                missing_skills=missing_skills,
-                match_reasoning=match_reasoning,
-                recruiter_status=MatchStatus.NEW.name,
-            )
-
-            db.add(match)
-            matches.append(match)
-
-            if len(matches) >= limit:
-                break
-
-        db.commit()
-        logger.info(f"Created {len(matches)} matches for job {job_id}")
+        try:
+            db.commit()
+        except Exception as e:
+            logger.error(f"Failed to commit matches to database: {type(e).__name__}: {e}", exc_info=True)
+            db.rollback()
+            raise
+        
+        logger.info(f"Successfully generated {len(matches)} matches for job {job_id}")
         return matches
 
     def _find_similar_resumes(
@@ -628,21 +716,26 @@ Return ONLY a valid JSON object in this exact format:
         if job_embedding and isinstance(job_embedding[0],list):
             job_embedding=job_embedding[0]
         embedding_str = "[" + ",".join(map(str, job_embedding)) + "]"
+        
+        allowed_tenant_ids = self._get_allowed_tenant_ids(tenant_id)
+        if not allowed_tenant_ids:
+            return []
+            
+        in_clause = ",".join([f"'{tid}'" for tid in allowed_tenant_ids])
+
         query = text(
-            """
-            SELECT
-                id,
-                1 - (embedding <=> CAST(:embedding AS vector)) as similarity
+            f"""
+            SELECT id, 1 - (embedding <=> :embedding) AS similarity
             FROM resumes
-            WHERE embedding IS NOT NULL
-              AND tenant_id = :tenant_id
-            ORDER BY embedding <=> CAST(:embedding AS vector)
+            WHERE tenant_id IN ({in_clause})
+            AND embedding IS NOT NULL
+            ORDER BY embedding <=> :embedding
             LIMIT :limit
-        """
+            """
         )
         result = db.execute(
             query,
-            {"embedding": embedding_str, "tenant_id": tenant_id, "limit": limit},
+            {"embedding": embedding_str, "limit": limit},
         ).fetchall()
         return [{"id": str(row[0]), "similarity": float(row[1])} for row in result]
 
@@ -675,16 +768,30 @@ Return ONLY a valid JSON object in this exact format:
         experience_score = self._calculate_experience_score(
             required_years=job.experience_required,
             candidate_years=resume.experience_years,
+            resume_text=resume.resume_text,
         )
 
-        education_score = 50.0
+        education_score = self._calculate_education_score(
+            required_education=job.education_required,
+            candidate_education=resume.education,
+        )
 
-        overall_score = (
-            vector_score * 100 * 0.4
-            + skill_match_score * 0.35
-            + experience_score * 0.15
+        # Rebalanced weights to favor skills
+        # Vector: 25%, Skills: 45%, Experience: 20%, Education: 10%
+        raw_overall_score = (
+            vector_score * 100 * 0.25
+            + skill_match_score * 0.45
+            + experience_score * 0.20
             + education_score * 0.10
         )
+
+        # Normalization / Boost logic
+        # Map a raw score of 60%+ to 85%+
+        if raw_overall_score >= 60.0:
+            overall_score = 85.0 + ((raw_overall_score - 60.0) / 40.0) * 15.0
+            overall_score = min(100.0, overall_score)
+        else:
+            overall_score = raw_overall_score
 
         return {
             "overall_score": round(overall_score, 2),
@@ -699,14 +806,69 @@ Return ONLY a valid JSON object in this exact format:
         self,
         required_years: Optional[int],
         candidate_years: Optional[int],
+        resume_text: Optional[str] = None,
     ) -> float:
         if not required_years:
             return 50.0
+
+        # Fallback to regex extraction if candidate_years is missing/0
+        if not candidate_years and resume_text:
+            import re
+            match = re.search(r"(\d+)\+?\s*(?:years?|yrs?)\s*(?:of\s*)?(?:experience|exp)", resume_text, re.IGNORECASE)
+            if match:
+                try:
+                    candidate_years = int(match.group(1))
+                except ValueError:
+                    pass
+
         if not candidate_years:
             return 0.0
+
         if candidate_years >= required_years:
             return 100.0
         return (candidate_years / required_years) * 100
+
+    def _calculate_education_score(
+        self,
+        required_education: Optional[str],
+        candidate_education: Optional[str],
+    ) -> float:
+        if not required_education:
+            return 50.0 # Neutral if no requirement
+            
+        if not candidate_education:
+            return 0.0
+            
+        def get_education_level(text: str) -> int:
+            text = text.lower()
+            if "phd" in text or "ph.d" in text or "doctorate" in text:
+                return 4
+            if "master" in text or "m.tech" in text or "m.sc" in text or "m.e" in text or "mca" in text or "m.com" in text:
+                return 3
+            if "bachelor" in text or "b.tech" in text or "b.sc" in text or "b.e" in text or "bca" in text or "b.com" in text or "degree" in text:
+                return 2
+            if "diploma" in text:
+                return 1
+            return 0
+            
+        req_level = get_education_level(required_education)
+        cand_level = get_education_level(candidate_education)
+        
+        # If we couldn't parse the requirement, we can't properly score it
+        if req_level == 0:
+            # Fallback to simple keyword match
+            if required_education.lower() in candidate_education.lower():
+                return 100.0
+            return 50.0
+            
+        if cand_level >= req_level:
+            return 100.0
+            
+        # Partial credit for being 1 level below
+        if cand_level == req_level - 1:
+            return 50.0
+            
+        return 0.0
 
     async def _generate_match_explanation(
         self,

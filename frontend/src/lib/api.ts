@@ -1,22 +1,35 @@
 // frontend/src/lib/api.ts
 function getApiBaseUrl(): string {
   const base = process.env.NEXT_PUBLIC_API_URL;
+  
+  // Proxy ANY railway.app URL through Next.js to avoid ISP blocks
+  if (base && base.includes('railway.app')) {
+    return '/api/backend';
+  }
+  
   if (!base) {
     throw new Error("NEXT_PUBLIC_API_URL is required");
   }
   return base;
 }
 
-function getAuthHeaders(): Record<string, string> {
+function getAuthHeaders(endpoint?: string): Record<string, string> {
   if (typeof window === "undefined") return {};
   const token =
     window.localStorage.getItem("token") ||
     window.sessionStorage.getItem("token");
+  if (!token) {
+    console.warn(`[API] No token found when requesting ${endpoint || 'unknown'}`);
+  }
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 function buildUrl(endpoint: string, params?: Record<string, string | number | boolean | undefined>): string {
-  const url = new URL(`${getApiBaseUrl()}${endpoint}`);
+  const baseUrl = getApiBaseUrl();
+  const fullPath = `${baseUrl}${endpoint}`;
+  const isAbsolute = fullPath.startsWith('http');
+  
+  const url = new URL(fullPath, isAbsolute ? undefined : 'http://dummy.local');
   if (params) {
     Object.entries(params).forEach(([key, value]) => {
       if (value !== undefined && value !== null) {
@@ -24,7 +37,8 @@ function buildUrl(endpoint: string, params?: Record<string, string | number | bo
       }
     });
   }
-  return url.toString();
+  
+  return isAbsolute ? url.toString() : url.pathname + url.search;
 }
 
 async function parseError(response: Response): Promise<Error> {
@@ -74,7 +88,7 @@ class ApiClient {
       method: "GET",
       headers: {
         "Content-Type": "application/json",
-        ...getAuthHeaders(),
+        ...getAuthHeaders(endpoint),
       },
     });
 
@@ -93,7 +107,7 @@ class ApiClient {
   const response = await fetch(buildUrl(endpoint, options?.params), {
     method: "GET",
     headers: {
-      ...getAuthHeaders(),
+      ...getAuthHeaders(endpoint),
     },
   });
 
@@ -110,7 +124,7 @@ class ApiClient {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...getAuthHeaders(),
+        ...getAuthHeaders(endpoint),
       },
       body: JSON.stringify(body),
     });
@@ -128,7 +142,7 @@ class ApiClient {
     const response = await fetch(`${getApiBaseUrl()}${endpoint}`, {
       method: "POST",
       headers: {
-        ...getAuthHeaders(),
+        ...getAuthHeaders(endpoint),
       },
       body: formData,
     });
@@ -147,7 +161,7 @@ class ApiClient {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
-        ...getAuthHeaders(),
+        ...getAuthHeaders(endpoint),
       },
       body: JSON.stringify(body),
     });
@@ -165,7 +179,7 @@ class ApiClient {
     const response = await fetch(`${getApiBaseUrl()}${endpoint}`, {
       method: "DELETE",
       headers: {
-        ...getAuthHeaders(),
+        ...getAuthHeaders(endpoint),
       },
     });
 

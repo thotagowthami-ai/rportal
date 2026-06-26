@@ -1,5 +1,5 @@
 "use client";
-
+import { getApiUrl } from "../../api";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import api from "@/lib/api";
@@ -17,6 +17,8 @@ type Candidate = {
   file_name?: string;
   created_at: string;
 };
+
+type ResumesResponse = Candidate[] | { items?: Candidate[]; results?: Candidate[] };
 
 // Helper function to parse and clean education field
 const parseEducation = (educationString: string | null | undefined): string => {
@@ -53,7 +55,6 @@ export default function ResumesPage() {
     const loadCandidates = async () => {
       try {
         setLoading(true);
-        type ResumesResponse = Candidate[] | { items?: Candidate[]; results?: Candidate[] };
         const res = await api.get<ResumesResponse>("/api/resumes");
         const list = Array.isArray(res.data)
           ? res.data
@@ -79,7 +80,6 @@ export default function ResumesPage() {
       const res = await api.post<{ message: string; count: number }>("/api/resumes/sync", {});
       toast.success(res.data.message);
       // Reload candidates
-      type ResumesResponse = Candidate[] | { items?: Candidate[]; results?: Candidate[] };
       const listRes = await api.get<ResumesResponse>("/api/resumes");
       const list = Array.isArray(listRes.data)
         ? listRes.data
@@ -136,22 +136,26 @@ export default function ResumesPage() {
       setUploadMessage("Upload failed. Please try again.");
     }
   };
-   const downloadResume = async (resumeId: string, fileName: string) => {
-  try {
-    const blob = await api.getBlob(`/api/resumes/${resumeId}/download`);
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName || "resume.pdf";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(url);
-  } catch (err) {
-    console.error("Download error:", err);
-    alert("Failed to download resume. Please try again.");
-  }
-};
+  const downloadResume = async (resumeId: string, fileName: string) => {
+    try {
+      const tokenRes = await api.post<{ download_token: string }>(`/api/resumes/${resumeId}/download-token`, {});
+      const downloadUrl = `${getApiUrl() ?? ""}/api/resumes/${resumeId}/download?token=${tokenRes.data.download_token}&download=true`;
+      const a = document.createElement("a");
+      a.href = downloadUrl;
+      a.download = fileName || "resume.pdf";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    } catch (err: any) {
+      console.error("Download error:", err);
+      const errMsg = err instanceof Error ? err.message : "";
+      if (errMsg.includes("404") || errMsg.toLowerCase().includes("not found")) {
+        toast.error("Resume file is missing from the server (wiped during redeployment). Please re-upload this candidate's resume.");
+      } else {
+        toast.error("Failed to download resume. Please try again.");
+      }
+    }
+  };
   
 
   const deleteCandidate = async () => {

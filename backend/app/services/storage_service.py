@@ -90,19 +90,25 @@ class StorageService:
             logger.exception("R2 upload failed")
             return None
 
-    def get_url_for_key(self, key: str) -> Optional[str]:
+    def get_url_for_key(self, key: str, disposition: Optional[str] = None, filename: Optional[str] = None) -> Optional[str]:
         if not self._is_configured():
             return None
         cleaned = self._normalize_key(key)
         if not cleaned:
             return None
-        if self.public_url:
+        # If we need a specific Content-Disposition override (like attachment), we must bypass 
+        # the direct static public URL and generate a presigned URL to inject the ResponseContentDisposition header.
+        if self.public_url and not disposition:
             return f"{self.public_url.rstrip('/')}/{cleaned}"
         try:
             client = self._get_client()
+            params = {"Bucket": self.bucket, "Key": cleaned}
+            if disposition:
+                filename_str = filename or os.path.basename(cleaned)
+                params["ResponseContentDisposition"] = f'{disposition}; filename="{filename_str}"'
             return client.generate_presigned_url(
                 "get_object",
-                Params={"Bucket": self.bucket, "Key": cleaned},
+                Params=params,
                 ExpiresIn=3600,
             )
         except (ClientError, BotoCoreError) as exc:

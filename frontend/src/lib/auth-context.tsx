@@ -1,5 +1,5 @@
 "use client";
-
+import { getApiUrl } from "../../api";
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 
 type User = {
@@ -13,6 +13,7 @@ type User = {
 type AuthContextType = {
   user: User | null;
   loading: boolean;
+  isExchangingCode: boolean;
   login: (email: string, password: string) => Promise<void>;
   signup: (
     email: string,
@@ -25,7 +26,7 @@ type AuthContextType = {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || undefined;
+const API_BASE_URL = getApiUrl() || undefined;
 
 function makeTenantSlug(input: string): string {
   return input
@@ -40,6 +41,7 @@ function makeTenantSlug(input: string): string {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isExchangingCode, setIsExchangingCode] = useState(false);
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -50,6 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const urlCode = params.get("code");
 
         if (urlCode && API_BASE_URL) {
+          setIsExchangingCode(true);
           try {
             const response = await fetch(`${API_BASE_URL}/api/auth/exchange-code`, {
               method: "POST",
@@ -73,6 +76,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } catch (e) {
             console.error("Failed to exchange one-time login code:", e);
           } finally {
+            setIsExchangingCode(false);
             // Always remove the code param so it cannot be replayed on refresh
             if (window.location.search.includes("code=")) {
               const newUrl = window.location.pathname;
@@ -188,7 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, signup, logout }}>
+    <AuthContext.Provider value={{ user, loading, isExchangingCode, login, signup, logout }}>
       {children}
     </AuthContext.Provider>
   );

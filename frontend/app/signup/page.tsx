@@ -1,5 +1,5 @@
 "use client";
-
+import { getApiUrl } from "../../api";
 import { FormEvent, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -28,7 +28,7 @@ export default function SignupPage() {
     setLoading(true);
 
     try {
-      const apiBase = (process.env.NEXT_PUBLIC_API_URL || "").trim();
+      const apiBase = (getApiUrl() || "").trim();
       const registerUrl = apiBase ? `${apiBase}/api/auth/register` : "/api/auth/register";
 
       await axios.post(registerUrl, {
@@ -36,12 +36,25 @@ export default function SignupPage() {
         email: formData.email,
         password: formData.password,
         tenant_name: `${formData.name}'s Organization`,
-        tenant_slug: formData.name.toLowerCase().replace(/\s+/g, '-') + '-' + Math.random().toString(36).substring(2, 7)
+        tenant_slug: formData.name.toLowerCase()
+          .replace(/[^a-z0-9]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '') + '-' + Math.random().toString(36).substring(2, 7)
       });
       toast.success("Account created successfully!");
       router.push("/login");
     } catch (err) {
-      const errorMessage = "Failed to create account";
+      let errorMessage = "Failed to create account";
+      if (axios.isAxiosError(err) && err.response?.data) {
+        const detail = err.response.data.detail;
+        if (typeof detail === "string") {
+          errorMessage = detail;
+        } else if (Array.isArray(detail) && detail[0]?.msg) {
+          errorMessage = detail[0].msg;
+        } else if (err.response.data.message) {
+          errorMessage = err.response.data.message;
+        }
+      }
       setError(errorMessage);
       toast.error(errorMessage);
     } finally {

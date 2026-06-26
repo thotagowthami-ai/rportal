@@ -1,5 +1,5 @@
 "use client";
-
+import { getApiUrl } from "../../../api";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -42,7 +42,7 @@ type CandidateMatchList = {
   total_pages: number;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "";
+const API_BASE_URL = getApiUrl() ?? "";
 
 export default function ResumeDetailPage() {
   const params = useParams<{ id: string }>();
@@ -101,17 +101,29 @@ export default function ResumeDetailPage() {
       return;
     }
 
+    const previewWindow = window.open("", "_blank", "noopener,noreferrer");
+    if (previewWindow) {
+      previewWindow.document.write(
+        "<p style='font-family:sans-serif; text-align:center; margin-top:20%; color:#515f74;'>Loading secure PDF preview...</p>"
+      );
+    }
+
     try {
-      const blob = await api.getBlob(`/api/resumes/${resumeId}/download`);
-      const url = window.URL.createObjectURL(blob);
-      const previewWindow = window.open(url, "_blank", "noopener,noreferrer");
-      // Revoke after 60s to allow PDF to fully load in new tab
-      setTimeout(() => window.URL.revokeObjectURL(url), 60000);
-      if (!previewWindow) {
-        toast.error("Popup blocked. Please allow popups or use Download.");
+      const tokenRes = await api.post<{ download_token: string }>(`/api/resumes/${resumeId}/download-token`, {});
+      const downloadUrl = `${API_BASE_URL}/api/resumes/${resumeId}/download?token=${tokenRes.data.download_token}`;
+      if (previewWindow) {
+        previewWindow.location.href = downloadUrl;
+      } else {
+        window.location.href = downloadUrl;
       }
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load PDF preview");
+    } catch (err: any) {
+      if (previewWindow) previewWindow.close();
+      const errMsg = err instanceof Error ? err.message : "Failed to load PDF preview";
+      if (errMsg.includes("404") || errMsg.toLowerCase().includes("not found")) {
+        toast.error("Resume file is missing from the server (wiped during redeployment). Please re-upload this candidate's resume.");
+      } else {
+        toast.error("Failed to load PDF preview. Please try again.");
+      }
     }
   };
 
@@ -122,17 +134,22 @@ export default function ResumeDetailPage() {
     }
 
     try {
-      const blob = await api.getBlob(`/api/resumes/${resumeId}/download`);
-      const downloadUrl = window.URL.createObjectURL(blob);
+      const tokenRes = await api.post<{ download_token: string }>(`/api/resumes/${resumeId}/download-token`, {});
+      const downloadUrl = `${API_BASE_URL}/api/resumes/${resumeId}/download?token=${tokenRes.data.download_token}&download=true`;
+      
       const a = document.createElement("a");
       a.href = downloadUrl;
       a.download = resume.file_name || "resume.pdf";
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      window.URL.revokeObjectURL(downloadUrl);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Download failed");
+    } catch (err: any) {
+      const errMsg = err instanceof Error ? err.message : "Download failed";
+      if (errMsg.includes("404") || errMsg.toLowerCase().includes("not found")) {
+        toast.error("Resume file is missing from the server (wiped during redeployment). Please re-upload this candidate's resume.");
+      } else {
+        toast.error("Download failed. Please try again.");
+      }
     }
   };
 
@@ -395,4 +412,4 @@ function formatEducation(raw: string | null): string {
   }
 
   return raw;
-}
+}

@@ -1,8 +1,9 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, Suspense, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { getApiUrl } from "../../api";
 
 type FormErrors = {
   email?: string;
@@ -10,8 +11,8 @@ type FormErrors = {
   form?: string;
 };
 
-export default function LoginPage() {
-  const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL;
+function LoginContent() {
+  const apiBaseUrl = getApiUrl();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -428,5 +429,13 @@ export default function LoginPage() {
         </section>
       </main>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#fdf8f3]" />}>
+      <LoginContent />
+    </Suspense>
   );
 }

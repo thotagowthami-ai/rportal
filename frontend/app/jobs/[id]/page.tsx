@@ -256,13 +256,15 @@ export default function JobDetailPage() {
     setGenerating(true);
     setError("");
     try {
-      await api.post<MatchListResponse, undefined>(`/api/matches/generate?job_id=${jobId}&limit=50`, undefined);
+      const res = await api.post<MatchListResponse, undefined>(`/api/matches/generate?job_id=${jobId}&limit=50`, undefined);
+      console.log('[DEBUG] Match response:', res.data);
       setMatchPage(1);
-      toast.success("Matches generated");
+      toast.success(`Found ${res.data.items?.length || 0} matches`);
       await loadPage();
     } catch (err) {
+      console.error(err);
       setError(err instanceof Error ? err.message : "Failed to generate matches");
-      toast.error(err instanceof Error ? err.message : "Failed to generate matches");
+      toast.error("Match generation failed. Check backend.");
     } finally {
       setGenerating(false);
     }
@@ -961,7 +963,7 @@ export default function JobDetailPage() {
                                   return (
                                     <div key={m.id} className="bg-white p-4 rounded-xl border border-[#e8dfd6] shadow-sm hover:shadow-md transition-all group">
                                       <div className="flex justify-between items-start mb-2">
-                                        <p className="font-bold text-[#1d1b19] text-sm truncate">{candidateName}</p>
+                                        <Link href={`/resumes/${m.resume_id}`} className="font-bold text-[#3525cd] hover:underline text-sm truncate">{candidateName}</Link>
                                         <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
                                           overall >= 75 ? "bg-green-50 text-green-700" : "bg-blue-50 text-blue-700"
                                         }`}>
@@ -1087,7 +1089,7 @@ export default function JobDetailPage() {
                                   className="rounded"
                                 />
                                 <div>
-                                  <p className="font-semibold text-[#1d1b19]">#{idx + 1} · {candidateName}</p>
+                                  <p className="font-semibold text-[#1d1b19]">#{idx + 1} · <Link href={`/resumes/${m.resume_id}`} className="text-[#3525cd] hover:underline">{candidateName}</Link></p>
                                   <p className="text-xs text-[#515f74]">Matched {daysAgo(m.created_at)}</p>
                                 </div>
                               </div>

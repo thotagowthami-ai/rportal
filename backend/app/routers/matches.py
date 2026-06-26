@@ -11,6 +11,7 @@ from app.services.matching_service import matching_service
 import math
 from datetime import datetime
 import logging
+import app.api.deps
 
 logger = logging.getLogger(__name__)
 
@@ -42,27 +43,39 @@ async def generate_matches(
     job_id: str = Query(..., description="Job ID to generate matches for"),
     limit: int = Query(50, ge=1, le=100),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    token: str = Depends(app.api.deps.oauth2_scheme)
 ):
     """
     Generate matches for a job description.
     Usage: POST /api/matches/generate?job_id=xxx&limit=50
     """
     try:
+        from app.models.job_description import JobDescription
+        from app.models.resume import Resume
+        job = db.query(JobDescription).filter(JobDescription.id == job_id).first()
+        allowed_tenant_ids = matching_service._get_allowed_tenant_ids(str(current_user.tenant_id))
+        resumes_count = db.query(Resume).filter(Resume.tenant_id.in_(allowed_tenant_ids)).count()
+        print(f"[DEBUG] Job found: {job}")
+        print(f"[DEBUG] Description: {job.description[:100] if job and job.description else 'NULL/EMPTY'}")
+        print(f"[DEBUG] Resume count: {resumes_count}")
+
         matches = await matching_service.generate_matches_for_job(
             job_id=job_id,
             db=db,
             tenant_id=str(current_user.tenant_id),
-            limit=limit
+            limit=limit,
+            token=token
         )
     except ValueError as e:
+        logger.warning(f"Match generation validation error: {e}")
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.exception("Match generation failed")
+        logger.exception(f"Match generation failed with error: {type(e).__name__}: {e}")
         error_msg = str(e).lower()
         if "image" in error_msg or "model does not support" in error_msg:
             raise HTTPException(status_code=400, detail="Unable to process candidate data. Please try again later.")
-        raise HTTPException(status_code=500, detail="Match generation failed")
+        raise HTTPException(status_code=500, detail=f"Match generation failed: {str(e)}")
 
     try:
         from app.routers.analytics import invalidate_analytics_cache
@@ -83,7 +96,8 @@ async def generate_matches(
 async def generate_matches_for_selected_resumes(
     payload: MatchGenerateSelectedRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    token: str = Depends(app.api.deps.oauth2_scheme)
 ):
     """
     Generate matches for one job against selected resume IDs only.
@@ -94,7 +108,8 @@ async def generate_matches_for_selected_resumes(
             db=db,
             tenant_id=str(current_user.tenant_id),
             limit=payload.limit,
-            resume_ids=payload.resume_ids
+            resume_ids=payload.resume_ids,
+            token=token
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -134,9 +149,10 @@ async def list_matches_for_job(
     List matches for a job with pagination.
     Usage: GET /api/matches/job?job_id=xxx&page=1&page_size=20
     """
+    allowed_tenant_ids = matching_service._get_allowed_tenant_ids(str(current_user.tenant_id))
     query = db.query(Match).filter(
         Match.job_description_id == job_id,
-        Match.tenant_id == current_user.tenant_id
+        Match.tenant_id.in_(allowed_tenant_ids)
     )
 
     if status_filter:
@@ -169,13 +185,14 @@ async def list_matches_for_resume(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    allowed_tenant_ids = matching_service._get_allowed_tenant_ids(str(current_user.tenant_id))
     query = (
         db.query(Match, JobDescription.title.label("job_title"), JobDescription.status.label("job_status"))
         .join(JobDescription, Match.job_description_id == JobDescription.id)
         .filter(
             Match.resume_id == resume_id,
-            Match.tenant_id == current_user.tenant_id,
-            JobDescription.tenant_id == current_user.tenant_id,
+            Match.tenant_id.in_(allowed_tenant_ids),
+            JobDescription.tenant_id.in_(allowed_tenant_ids),
         )
     )
 

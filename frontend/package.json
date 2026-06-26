@@ -9,7 +9,11 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:e2e": "playwright test tests/smoke.spec.ts",
+    "test:e2e:auth": "playwright test tests/auth-flows.spec.ts",
+    "test:e2e:all": "playwright test",
+    "test:e2e:report": "playwright show-report"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

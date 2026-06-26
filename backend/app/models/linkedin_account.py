@@ -6,7 +6,6 @@ import uuid
 
 from cryptography.fernet import Fernet, InvalidToken
 from sqlalchemy import Column, DateTime, ForeignKey, Index, String, Text
-from sqlalchemy.ext.hybrid import hybrid_property
 
 from app.config import settings
 from app.database import Base
@@ -56,7 +55,7 @@ class LinkedInAccount(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
-    @hybrid_property
+    @property
     def access_token(self) -> str:
         """Transparently decrypt the access token upon retrieval."""
         if not self._access_token:

@@ -1,5 +1,5 @@
 "use client";
-
+import { getApiUrl } from "../../../api";
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
@@ -304,18 +304,25 @@ export default function CandidateProfilePage() {
                 </button>
 
                 <button className="inline-flex items-center gap-2 px-6 py-3 rounded-lg border border-[#e8dfd6] bg-white text-[#1d1b19] font-bold hover:bg-[#fdf8f3] transition-all hover:-translate-y-0.5" onClick={async () => {
+                  const previewWindow = window.open("", "_blank", "noopener,noreferrer");
+                  if (previewWindow) {
+                    previewWindow.document.write(
+                      "<p style='font-family:sans-serif; text-align:center; margin-top:20%; color:#515f74;'>Loading secure PDF preview...</p>"
+                    );
+                  }
+
                   try {
-                    const blob = await api.getBlob(`/api/resumes/${resume.id}/download`);
-                    const url = window.URL.createObjectURL(blob);
-                    const newTab = window.open(url, '_blank');
-                    // Revoke after 60s to allow PDF to fully load in new tab
-                    setTimeout(() => window.URL.revokeObjectURL(url), 60000);
-                    if (!newTab) {
-                      alert("Popup blocked. Please allow popups for this site and try again.");
+                    const tokenRes = await api.post<{ download_token: string }>(`/api/resumes/${resume.id}/download-token`, {});
+                    const downloadUrl = `${getApiUrl() ?? ""}/api/resumes/${resume.id}/download?token=${tokenRes.data.download_token}`;
+                    if (previewWindow) {
+                      previewWindow.location.href = downloadUrl;
                     }
-                  } catch (err: unknown) {
-                    const errorMsg = err instanceof Error ? err.message : "Failed to view PDF";
-                    alert(errorMsg.includes("missing") ? `Resume file is missing. Please re-upload the resume.` : "Failed to view PDF. Please try again.");
+                  } catch (err: any) {
+                    if (previewWindow) previewWindow.close();
+                    const errMsg = err instanceof Error ? err.message : "Failed to view PDF";
+                    alert(errMsg.includes("404") || errMsg.toLowerCase().includes("not found")
+                      ? "Resume file is missing from the server (wiped during redeployment). Please re-upload this candidate's resume."
+                      : "Failed to view PDF. Please try again.");
                   }
                 }}>
                   📄 View PDF
@@ -323,18 +330,20 @@ export default function CandidateProfilePage() {
 
                 <button className="inline-flex items-center gap-2 px-6 py-3 rounded-lg border border-[#e8dfd6] bg-white text-[#1d1b19] font-bold hover:bg-[#fdf8f3] transition-all hover:-translate-y-0.5" onClick={async () => {
                   try {
-                    const blob = await api.getBlob(`/api/resumes/${resume.id}/download`);
-                    const url = window.URL.createObjectURL(blob);
+                    const tokenRes = await api.post<{ download_token: string }>(`/api/resumes/${resume.id}/download-token`, {});
+                    const downloadUrl = `${getApiUrl() ?? ""}/api/resumes/${resume.id}/download?token=${tokenRes.data.download_token}&download=true`;
+                    
                     const a = document.createElement("a");
-                    a.href = url;
+                    a.href = downloadUrl;
                     a.download = resume.file_name || "resume.pdf";
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
-                    window.URL.revokeObjectURL(url);
-                  } catch (err: unknown) {
-                    const errorMsg = err instanceof Error ? err.message : "Failed to download resume";
-                    alert(errorMsg.includes("missing") ? `Resume file is missing. Please re-upload the resume.` : "Failed to download resume. Please try again.");
+                  } catch (err: any) {
+                    const errMsg = err instanceof Error ? err.message : "Failed to download resume";
+                    alert(errMsg.includes("404") || errMsg.toLowerCase().includes("not found")
+                      ? "Resume file is missing from the server (wiped during redeployment). Please re-upload this candidate's resume."
+                      : "Failed to download resume. Please try again.");
                   }
                 }}>
                   ⬇️ Download

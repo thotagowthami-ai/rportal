@@ -24,7 +24,7 @@ import re
 logger = logging.getLogger(__name__)
 
 
-router = APIRouter(prefix="/jobs", tags=["Job Descriptions"])
+router = APIRouter(prefix="/jobs", tags=["Job Descriptions"], redirect_slashes=False)
 
 
 @router.get("/public/list", response_model=JobDescriptionList)
@@ -341,7 +341,7 @@ async def _create_job_internal(
     )
 
 
-@router.post("/", response_model=JobDescriptionResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=JobDescriptionResponse, status_code=status.HTTP_201_CREATED)
 async def create_job(
     job_data: JobDescriptionCreate,
     db: Session = Depends(get_db),
@@ -384,7 +384,7 @@ async def create_job_from_text(
         )
 
 
-@router.get("/", response_model=JobDescriptionList)
+@router.get("", response_model=JobDescriptionList)
 async def list_jobs(
     page: int = 1,
     page_size: int = 20,

@@ -118,7 +118,7 @@ export default function JobsPage() {
     setLoading(true);
     setError("");
     try {
-      const res = await api.get<JobListResponse>("/api/jobs/", {
+      const res = await api.get<JobListResponse>("/api/jobs", {
         params: {
           page,
           page_size: pageSize,
@@ -152,7 +152,7 @@ export default function JobsPage() {
     setError("");
 
     try {
-      await api.post<Job, CreateJobPayload>("/api/jobs/", payload);
+      await api.post<Job, CreateJobPayload>("/api/jobs", payload);
       setForm(emptyForm);
       setRequiredSkillsText("");
       setPreferredSkillsText("");
@@ -335,8 +335,8 @@ export default function JobsPage() {
                               key={job.id}
                               className="border-b border-[#e8dfd6] hover:bg-[#fef8f3] transition-colors"
                             >
-                              <td className="px-8 py-4 text-sm text-[#1d1b19] font-medium">
-                                {job.title}
+                              <td className="px-8 py-4 text-sm text-[#1d1b19] font-medium max-w-xs truncate">
+                                {job.title || (job as any).job_title || "Untitled Job"}
                               </td>
                               <td className="px-8 py-4">
                                 <span
