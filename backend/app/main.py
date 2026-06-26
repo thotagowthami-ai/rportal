@@ -14,7 +14,7 @@ app = FastAPI(
     redirect_slashes=True,
 )
 
-allowed_origins=allowed_origins = settings.ALLOWED_ORIGINS
+allowed_origins = settings.ALLOWED_ORIGINS
 if isinstance(allowed_origins, str):
     raw = allowed_origins.strip()
     if raw.startswith("[") and raw.endswith("]"):
